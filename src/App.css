@@ -48,7 +48,8 @@
 .two-column {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  gap: 24px;
+  align-items: start;
 }
 
 h2,
@@ -64,7 +65,7 @@ h3 {
 .inline-form,
 .form-grid {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .inline-form {
@@ -73,6 +74,11 @@ h3 {
 
 .form-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.form-section {
+  display: grid;
+  gap: 16px;
 }
 
 input,
@@ -106,15 +112,26 @@ button:hover {
 }
 
 .checkbox-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
 }
 
 .checkbox-list label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #dbe3f0;
+  border-radius: 12px;
+  background: #fff;
+  word-break: keep-all;
+}
+
+.checkbox-list label input {
+  width: auto;
+  margin: 0;
 }
 
 .participant-box,

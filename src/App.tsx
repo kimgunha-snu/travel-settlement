@@ -272,7 +272,7 @@ function App() {
         </section>
 
         <section className="panel two-column">
-          <div>
+          <div className="form-section">
             <h2>지출 추가</h2>
             <div className="form-grid">
               <input value={expenseForm.title} onChange={(event) => setExpenseForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
@@ -306,7 +306,7 @@ function App() {
             <button onClick={addExpense}>지출 저장</button>
           </div>
 
-          <div>
+          <div className="form-section">
             <h2>송금 기록</h2>
             <div className="form-grid">
               <input value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액" inputMode="numeric" />
