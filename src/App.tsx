@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
 type Member = {
@@ -51,6 +51,21 @@ const currency = new Intl.NumberFormat('ko-KR', {
 const storageKey = 'travel-settlement-app-data'
 const createId = () => Math.random().toString(36).slice(2, 10)
 
+const readStoredData = (): ImportPayload => {
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return { members: [], expenses: [], transfers: [] }
+    const parsed = JSON.parse(raw) as Partial<ImportPayload>
+    return {
+      members: Array.isArray(parsed.members) ? parsed.members : [],
+      expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
+      transfers: Array.isArray(parsed.transfers) ? parsed.transfers : [],
+    }
+  } catch {
+    return { members: [], expenses: [], transfers: [] }
+  }
+}
+
 const hasBatchim = (name: string) => {
   const last = name.trim().at(-1)
   if (!last) return false
@@ -62,9 +77,10 @@ const hasBatchim = (name: string) => {
 const withSubjectParticle = (name: string) => `${name}${hasBatchim(name) ? '이' : '가'}`
 
 function App() {
-  const [members, setMembers] = useState<Member[]>([])
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [transfers, setTransfers] = useState<Transfer[]>([])
+  const stored = readStoredData()
+  const [members, setMembers] = useState<Member[]>(stored.members)
+  const [expenses, setExpenses] = useState<Expense[]>(stored.expenses)
+  const [transfers, setTransfers] = useState<Transfer[]>(stored.transfers)
   const [newMemberName, setNewMemberName] = useState('')
   const [expenseForm, setExpenseForm] = useState({
     title: '',
@@ -81,27 +97,8 @@ function App() {
   const [importText, setImportText] = useState('')
   const [importMessage, setImportMessage] = useState('내보낸 데이터(JSON)를 붙여넣으면 지금 상태를 그대로 복구할 수 있어요.')
   const [exportMessage, setExportMessage] = useState('')
-  const [exportText, setExportText] = useState('')
-  const hasLoadedStorageRef = useRef(false)
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(storageKey)
-      if (raw) {
-        const parsed = JSON.parse(raw) as ImportPayload
-        setMembers(parsed.members ?? [])
-        setExpenses(parsed.expenses ?? [])
-        setTransfers(parsed.transfers ?? [])
-      }
-    } catch {
-      // ignore broken local data
-    } finally {
-      hasLoadedStorageRef.current = true
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!hasLoadedStorageRef.current) return
     window.localStorage.setItem(storageKey, JSON.stringify({ members, expenses, transfers }))
   }, [members, expenses, transfers])
 
@@ -253,17 +250,19 @@ function App() {
     setTransferForm((current) => ({ ...current, amount: '' }))
   }
 
-  const exportData = async () => {
+  const exportData = () => {
     const payload: ImportPayload = { members, expenses, transfers }
     const text = JSON.stringify(payload, null, 2)
-    setExportText(text)
-
-    try {
-      await navigator.clipboard.writeText(text)
-      setExportMessage('현재 정산 데이터를 JSON으로 클립보드에 복사했어요.')
-    } catch {
-      setExportMessage('클립보드 복사가 막혀서 아래 텍스트 상자에 export 내용을 보여줄게요. 직접 복사해 주세요.')
-    }
+    const blob = new Blob([text], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `travel-settlement-export-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+    setExportMessage('현재 정산 데이터를 JSON 파일로 다운로드했어요.')
   }
 
   const importData = () => {
@@ -299,7 +298,6 @@ function App() {
           <button onClick={exportData}>Export</button>
         </div>
         {exportMessage && <p className="helper export-message">{exportMessage}</p>}
-        {exportText && <textarea className="export-box" value={exportText} readOnly rows={8} />}
       </header>
 
       <main className="layout">
