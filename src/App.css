@@ -138,6 +138,20 @@ button:hover {
   font-weight: 600;
 }
 
+.removable-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.removable-chip button {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #c7d2fe;
+  color: #312e81;
+  font-size: 0.8rem;
+}
+
 .table-wrap {
   overflow-x: auto;
 }

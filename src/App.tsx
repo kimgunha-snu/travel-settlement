@@ -44,44 +44,31 @@ const currency = new Intl.NumberFormat('ko-KR', {
 
 const createId = () => Math.random().toString(36).slice(2, 10)
 
-const initialMembers: Member[] = [
-  { id: createId(), name: '건하' },
-  { id: createId(), name: '현민' },
-  { id: createId(), name: '지오' },
-]
+const hasBatchim = (name: string) => {
+  const last = name.trim().at(-1)
+  if (!last) return false
+  const code = last.charCodeAt(0)
+  if (code < 0xac00 || code > 0xd7a3) return false
+  return (code - 0xac00) % 28 !== 0
+}
 
-const initialExpenses = (members: Member[]): Expense[] => [
-  {
-    id: createId(),
-    title: '숙소',
-    amount: 180000,
-    payerId: members[0].id,
-    participantIds: members.map((member) => member.id),
-  },
-  {
-    id: createId(),
-    title: '저녁',
-    amount: 72000,
-    payerId: members[1].id,
-    participantIds: members.map((member) => member.id),
-  },
-]
+const withSubjectParticle = (name: string) => `${name}${hasBatchim(name) ? '이' : '가'}`
 
 function App() {
-  const [members, setMembers] = useState<Member[]>(initialMembers)
-  const [expenses, setExpenses] = useState<Expense[]>(() => initialExpenses(initialMembers))
+  const [members, setMembers] = useState<Member[]>([])
+  const [expenses, setExpenses] = useState<Expense[]>([])
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const [newMemberName, setNewMemberName] = useState('')
   const [expenseForm, setExpenseForm] = useState({
     title: '',
     amount: '',
-    payerId: initialMembers[0]?.id ?? '',
-    participantIds: initialMembers.map((member) => member.id),
+    payerId: '',
+    participantIds: [] as string[],
   })
   const [transferForm, setTransferForm] = useState({
     amount: '',
-    fromId: initialMembers[0]?.id ?? '',
-    toId: initialMembers[1]?.id ?? initialMembers[0]?.id ?? '',
+    fromId: '',
+    toId: '',
   })
 
   const memberMap = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members])
@@ -141,11 +128,7 @@ function App() {
       const creditor = creditors[j]
       const amount = Math.min(debtor.amount, creditor.amount)
 
-      result.push({
-        fromId: debtor.memberId,
-        toId: creditor.memberId,
-        amount,
-      })
+      result.push({ fromId: debtor.memberId, toId: creditor.memberId, amount })
 
       debtor.amount -= amount
       creditor.amount -= amount
@@ -157,15 +140,18 @@ function App() {
     return result
   }, [balances])
 
+  const allMembersSelected = members.length > 0 && expenseForm.participantIds.length === members.length
+
   const addMember = () => {
     const name = newMemberName.trim()
     if (!name) return
+
     const member = { id: createId(), name }
     setMembers((current) => [...current, member])
     setExpenseForm((current) => ({
       ...current,
       payerId: current.payerId || member.id,
-      participantIds: [...current.participantIds, member.id],
+      participantIds: current.participantIds.length === 0 ? [member.id] : [...current.participantIds, member.id],
     }))
     setTransferForm((current) => ({
       ...current,
@@ -175,12 +161,43 @@ function App() {
     setNewMemberName('')
   }
 
+  const removeMember = (memberId: string) => {
+    setMembers((current) => current.filter((member) => member.id !== memberId))
+    setExpenses((current) =>
+      current
+        .filter((expense) => expense.payerId !== memberId)
+        .map((expense) => ({
+          ...expense,
+          participantIds: expense.participantIds.filter((id) => id !== memberId),
+        }))
+        .filter((expense) => expense.participantIds.length > 0),
+    )
+    setTransfers((current) => current.filter((transfer) => transfer.fromId !== memberId && transfer.toId !== memberId))
+    setExpenseForm((current) => ({
+      ...current,
+      payerId: current.payerId === memberId ? '' : current.payerId,
+      participantIds: current.participantIds.filter((id) => id !== memberId),
+    }))
+    setTransferForm((current) => ({
+      ...current,
+      fromId: current.fromId === memberId ? '' : current.fromId,
+      toId: current.toId === memberId ? '' : current.toId,
+    }))
+  }
+
   const toggleExpenseParticipant = (memberId: string) => {
     setExpenseForm((current) => ({
       ...current,
       participantIds: current.participantIds.includes(memberId)
         ? current.participantIds.filter((id) => id !== memberId)
         : [...current.participantIds, memberId],
+    }))
+  }
+
+  const toggleAllExpenseParticipants = () => {
+    setExpenseForm((current) => ({
+      ...current,
+      participantIds: allMembersSelected ? [] : members.map((member) => member.id),
     }))
   }
 
@@ -199,11 +216,7 @@ function App() {
       },
     ])
 
-    setExpenseForm((current) => ({
-      ...current,
-      title: '',
-      amount: '',
-    }))
+    setExpenseForm((current) => ({ ...current, title: '', amount: '' }))
   }
 
   const addTransfer = () => {
@@ -221,10 +234,7 @@ function App() {
       },
     ])
 
-    setTransferForm((current) => ({
-      ...current,
-      amount: '',
-    }))
+    setTransferForm((current) => ({ ...current, amount: '' }))
   }
 
   const removeExpense = (id: string) => setExpenses((current) => current.filter((expense) => expense.id !== id))
@@ -236,9 +246,7 @@ function App() {
         <div>
           <p className="eyebrow">여행 정산 앱</p>
           <h1>누가 얼마를 내고, 받아야 하는지 한 번에 정리</h1>
-          <p className="subtitle">
-            여행 중 사용한 돈, 송금 내역, 같이 쓴 사람만 넣으면 자동으로 정산 결과를 계산해줘요.
-          </p>
+          <p className="subtitle">여행 중 사용한 돈, 송금 내역, 같이 쓴 사람만 넣으면 자동으로 정산 결과를 계산해줘요.</p>
         </div>
       </header>
 
@@ -246,19 +254,20 @@ function App() {
         <section className="panel">
           <h2>참가자</h2>
           <div className="inline-form">
-            <input
-              value={newMemberName}
-              onChange={(event) => setNewMemberName(event.target.value)}
-              placeholder="이름 추가"
-            />
+            <input value={newMemberName} onChange={(event) => setNewMemberName(event.target.value)} placeholder="이름 추가" />
             <button onClick={addMember}>추가</button>
           </div>
           <div className="chips">
-            {members.map((member) => (
-              <span key={member.id} className="chip">
-                {member.name}
-              </span>
-            ))}
+            {members.length === 0 ? (
+              <div className="empty">아직 참가자가 없어요.</div>
+            ) : (
+              members.map((member) => (
+                <span key={member.id} className="chip removable-chip">
+                  {member.name}
+                  <button type="button" onClick={() => removeMember(member.id)}>삭제</button>
+                </span>
+              ))
+            )}
           </div>
         </section>
 
@@ -266,24 +275,13 @@ function App() {
           <div>
             <h2>지출 추가</h2>
             <div className="form-grid">
-              <input
-                value={expenseForm.title}
-                onChange={(event) => setExpenseForm((current) => ({ ...current, title: event.target.value }))}
-                placeholder="항목명"
-              />
-              <input
-                value={expenseForm.amount}
-                onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))}
-                placeholder="금액"
-                inputMode="numeric"
-              />
-              <select
-                value={expenseForm.payerId}
-                onChange={(event) => setExpenseForm((current) => ({ ...current, payerId: event.target.value }))}
-              >
+              <input value={expenseForm.title} onChange={(event) => setExpenseForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
+              <input value={expenseForm.amount} onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액" inputMode="numeric" />
+              <select value={expenseForm.payerId} onChange={(event) => setExpenseForm((current) => ({ ...current, payerId: event.target.value }))}>
+                <option value="">결제자 선택</option>
                 {members.map((member) => (
                   <option key={member.id} value={member.id}>
-                    {member.name}가 결제
+                    {withSubjectParticle(member.name)} 결제
                   </option>
                 ))}
               </select>
@@ -291,13 +289,15 @@ function App() {
             <div className="participant-box">
               <p className="helper">누가 같이 썼는지 선택</p>
               <div className="checkbox-list">
+                {members.length > 0 && (
+                  <label>
+                    <input type="checkbox" checked={allMembersSelected} onChange={toggleAllExpenseParticipants} />
+                    전원(모두)
+                  </label>
+                )}
                 {members.map((member) => (
                   <label key={member.id}>
-                    <input
-                      type="checkbox"
-                      checked={expenseForm.participantIds.includes(member.id)}
-                      onChange={() => toggleExpenseParticipant(member.id)}
-                    />
+                    <input type="checkbox" checked={expenseForm.participantIds.includes(member.id)} onChange={() => toggleExpenseParticipant(member.id)} />
                     {member.name}
                   </label>
                 ))}
@@ -309,29 +309,20 @@ function App() {
           <div>
             <h2>송금 기록</h2>
             <div className="form-grid">
-              <input
-                value={transferForm.amount}
-                onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))}
-                placeholder="송금 금액"
-                inputMode="numeric"
-              />
-              <select
-                value={transferForm.fromId}
-                onChange={(event) => setTransferForm((current) => ({ ...current, fromId: event.target.value }))}
-              >
+              <input value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액" inputMode="numeric" />
+              <select value={transferForm.fromId} onChange={(event) => setTransferForm((current) => ({ ...current, fromId: event.target.value }))}>
+                <option value="">보내는 사람 선택</option>
                 {members.map((member) => (
                   <option key={member.id} value={member.id}>
-                    {member.name}가 보냄
+                    {withSubjectParticle(member.name)} 보냄
                   </option>
                 ))}
               </select>
-              <select
-                value={transferForm.toId}
-                onChange={(event) => setTransferForm((current) => ({ ...current, toId: event.target.value }))}
-              >
+              <select value={transferForm.toId} onChange={(event) => setTransferForm((current) => ({ ...current, toId: event.target.value }))}>
+                <option value="">받는 사람 선택</option>
                 {members.map((member) => (
                   <option key={member.id} value={member.id}>
-                    {member.name}가 받음
+                    {withSubjectParticle(member.name)} 받음
                   </option>
                 ))}
               </select>
@@ -392,20 +383,22 @@ function App() {
             <h2>입력된 내역</h2>
             <h3>지출</h3>
             <div className="history-list">
-              {expenses.map((expense) => (
-                <div key={expense.id} className="history-item">
-                  <div>
-                    <strong>{expense.title}</strong>
-                    <p>
-                      {memberMap[expense.payerId]?.name} 결제, {expense.participantIds.map((id) => memberMap[id]?.name).join(', ')} 사용
-                    </p>
+              {expenses.length === 0 ? (
+                <div className="empty">아직 입력된 지출이 없어요.</div>
+              ) : (
+                expenses.map((expense) => (
+                  <div key={expense.id} className="history-item">
+                    <div>
+                      <strong>{expense.title}</strong>
+                      <p>{withSubjectParticle(memberMap[expense.payerId]?.name ?? '')} 결제, {expense.participantIds.map((id) => memberMap[id]?.name).join(', ')} 사용</p>
+                    </div>
+                    <div className="history-side">
+                      <span>{currency.format(expense.amount)}</span>
+                      <button onClick={() => removeExpense(expense.id)}>삭제</button>
+                    </div>
                   </div>
-                  <div className="history-side">
-                    <span>{currency.format(expense.amount)}</span>
-                    <button onClick={() => removeExpense(expense.id)}>삭제</button>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
 
             <h3>송금</h3>
@@ -416,9 +409,7 @@ function App() {
                 transfers.map((transfer) => (
                   <div key={transfer.id} className="history-item">
                     <div>
-                      <strong>
-                        {memberMap[transfer.fromId]?.name} → {memberMap[transfer.toId]?.name}
-                      </strong>
+                      <strong>{memberMap[transfer.fromId]?.name} → {memberMap[transfer.toId]?.name}</strong>
                     </div>
                     <div className="history-side">
                       <span>{currency.format(transfer.amount)}</span>
