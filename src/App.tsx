@@ -13,6 +13,7 @@ import {
   getSettlementByToken,
   subscribeSettlement,
   updateRemoteExpense,
+  updateRemoteMember,
   updateRemoteTransfer,
   updateSettlement,
   type SettlementPayload,
@@ -179,6 +180,7 @@ function App() {
   const [shareUrl, setShareUrl] = useState('')
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
   const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
+  const [isMembersModalOpen, setIsMembersModalOpen] = useState(false)
   const [expenseEditForm, setExpenseEditForm] = useState({ title: '', amount: '', payerId: '', participantIds: [] as string[] })
   const [transferEditForm, setTransferEditForm] = useState({ amount: '', fromId: '', toId: '' })
   const lastRemoteJsonRef = useRef('')
@@ -379,6 +381,19 @@ function App() {
       toId: current.toId || member.id,
     }))
     setNewMemberName('')
+  }
+
+  const updateMemberName = (memberId: string, name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+
+    if (sharedSettlementId && canUseRemoteStore()) {
+      setMembers((current) => current.map((member) => member.id === memberId ? { ...member, name: trimmed } : member))
+      void updateRemoteMember({ id: memberId, name: trimmed }).catch(() => setRemoteStatus('참가자 이름 수정에 실패했어요.'))
+      return
+    }
+
+    setMembers((current) => current.map((member) => member.id === memberId ? { ...member, name: trimmed } : member))
   }
 
   const removeMember = (memberId: string) => {
@@ -773,7 +788,10 @@ function App() {
 
       <main className="layout">
         <section className="panel">
-          <h2>참가자</h2>
+          <div className="section-header-with-actions">
+            <h2>참가자</h2>
+            <button onClick={() => setIsMembersModalOpen(true)}>참가자 관리</button>
+          </div>
           <div className="inline-form">
             <input
               value={newMemberName}
@@ -1015,6 +1033,46 @@ function App() {
             </div>
             <p className="helper">클립보드 복사가 안 되면 아래 내용을 직접 복사해 쓰면 돼요.</p>
             <textarea value={summaryText} readOnly rows={8} />
+          </div>
+        </div>
+      )}
+
+      {isMembersModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsMembersModalOpen(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>참가자 관리</h2>
+              <button className="ghost-button" onClick={() => setIsMembersModalOpen(false)}>닫기</button>
+            </div>
+            <div className="member-manage-list">
+              {members.length === 0 ? (
+                <div className="empty">아직 참가자가 없어요.</div>
+              ) : (
+                members.map((member) => (
+                  <div key={member.id} className="member-manage-row">
+                    <input
+                      value={member.name}
+                      onChange={(event) => updateMemberName(member.id, event.target.value)}
+                      placeholder="이름"
+                    />
+                    <button onClick={() => removeMember(member.id)}>삭제</button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="inline-form">
+              <input
+                value={newMemberName}
+                onChange={(event) => setNewMemberName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  event.preventDefault()
+                  void addMember()
+                }}
+                placeholder="새 참가자 추가"
+              />
+              <button onClick={() => void addMember()}>추가</button>
+            </div>
           </div>
         </div>
       )}
