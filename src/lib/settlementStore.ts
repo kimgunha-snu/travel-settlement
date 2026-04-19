@@ -91,11 +91,12 @@ export const createSettlement = async (title = '공유 정산', payload?: Settle
   if (error) throw error
 
   const recordBase = data as Omit<SettlementRecord, 'data'>
-  const record = payload
-    ? await getSettlement(recordBase.id)
-    : { ...recordBase, data: { members: [], expenses: [], transfers: [] } }
+  if (payload) {
+    await replaceSettlementContent(recordBase.id, payload)
+    return getSettlement(recordBase.id)
+  }
 
-  return record
+  return { ...recordBase, data: { members: [], expenses: [], transfers: [] } }
 }
 
 export const getSettlement = async (id: string) => {
@@ -114,7 +115,7 @@ export const getSettlement = async (id: string) => {
   if (transfersError) throw transfersError
 
   return {
-    ...(settlement as SettlementRecord),
+    ...(settlement as Omit<SettlementRecord, 'data'>),
     data: mapPayloadFromRows(members as MemberRow[], expenses as ExpenseRow[], transfers as TransferRow[]),
   }
 }
@@ -159,6 +160,82 @@ export const replaceSettlementContent = async (id: string, payload: SettlementPa
     )
     if (error) throw error
   }
+}
+
+export const addRemoteMember = async (settlementId: string, member: Member) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(membersTable).insert({ id: member.id, settlement_id: settlementId, name: member.name })
+  if (error) throw error
+}
+
+export const updateRemoteMember = async (member: Member) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(membersTable).update({ name: member.name }).eq('id', member.id)
+  if (error) throw error
+}
+
+export const deleteRemoteMember = async (memberId: string) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(membersTable).delete().eq('id', memberId)
+  if (error) throw error
+}
+
+export const addRemoteExpense = async (settlementId: string, expense: Expense) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(expensesTable).insert({
+    id: expense.id,
+    settlement_id: settlementId,
+    title: expense.title,
+    amount: expense.amount,
+    payer_member_id: expense.payerId,
+    participant_member_ids: expense.participantIds,
+  })
+  if (error) throw error
+}
+
+export const updateRemoteExpense = async (expense: Expense) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(expensesTable).update({
+    title: expense.title,
+    amount: expense.amount,
+    payer_member_id: expense.payerId,
+    participant_member_ids: expense.participantIds,
+  }).eq('id', expense.id)
+  if (error) throw error
+}
+
+export const deleteRemoteExpense = async (expenseId: string) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(expensesTable).delete().eq('id', expenseId)
+  if (error) throw error
+}
+
+export const addRemoteTransfer = async (settlementId: string, transfer: Transfer) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(transfersTable).insert({
+    id: transfer.id,
+    settlement_id: settlementId,
+    amount: transfer.amount,
+    from_member_id: transfer.fromId,
+    to_member_id: transfer.toId,
+  })
+  if (error) throw error
+}
+
+export const updateRemoteTransfer = async (transfer: Transfer) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(transfersTable).update({
+    amount: transfer.amount,
+    from_member_id: transfer.fromId,
+    to_member_id: transfer.toId,
+  }).eq('id', transfer.id)
+  if (error) throw error
+}
+
+export const deleteRemoteTransfer = async (transferId: string) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(transfersTable).delete().eq('id', transferId)
+  if (error) throw error
 }
 
 export const subscribeSettlement = (id: string, onData: (record: SettlementRecord) => void) => {

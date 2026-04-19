@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
+  addRemoteExpense,
+  addRemoteMember,
+  addRemoteTransfer,
   canUseRemoteStore,
   createSettlement,
+  deleteRemoteExpense,
+  deleteRemoteMember,
+  deleteRemoteTransfer,
   getSettlement,
   subscribeSettlement,
+  updateRemoteExpense,
+  updateRemoteTransfer,
   updateSettlement,
   type SettlementPayload,
 } from './lib/settlementStore'
@@ -209,18 +217,8 @@ function App() {
       return
     }
 
-    const timeout = window.setTimeout(async () => {
-      try {
-        await updateSettlement(sharedSettlementId, currentPayload)
-        lastRemoteJsonRef.current = currentPayloadJson
-        setRemoteStatus(`자동 저장됨: ${sharedSettlementId}`)
-      } catch {
-        setRemoteStatus('공유 정산 자동 저장에 실패했어요.')
-      }
-    }, 500)
-
-    return () => window.clearTimeout(timeout)
-  }, [sharedSettlementId, currentPayload, currentPayloadJson])
+    lastRemoteJsonRef.current = currentPayloadJson
+  }, [sharedSettlementId, currentPayloadJson])
 
   const memberMap = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members])
 
@@ -283,12 +281,23 @@ function App() {
 
   const allMembersSelected = members.length > 0 && expenseForm.participantIds.length === members.length
 
-  const addMember = () => {
+  const addMember = async () => {
     const name = newMemberName.trim()
     if (!name) return
 
     const member = { id: createId(), name }
-    setMembers((current) => [...current, member])
+
+    if (sharedSettlementId && canUseRemoteStore()) {
+      try {
+        await addRemoteMember(sharedSettlementId, member)
+      } catch {
+        setRemoteStatus('참가자 추가에 실패했어요.')
+        return
+      }
+    } else {
+      setMembers((current) => [...current, member])
+    }
+
     setExpenseForm((current) => ({
       ...current,
       payerId: current.payerId || member.id,
@@ -307,14 +316,18 @@ function App() {
     const shouldDelete = window.confirm(`${withObjectParticle(memberName)} 삭제하면 관련 지출/송금 데이터도 함께 바뀔 수 있어요. 정말 삭제할까요?`)
     if (!shouldDelete) return
 
-    setMembers((current) => current.filter((member) => member.id !== memberId))
-    setExpenses((current) =>
-      current
-        .filter((expense) => expense.payerId !== memberId)
-        .map((expense) => ({ ...expense, participantIds: expense.participantIds.filter((id) => id !== memberId) }))
-        .filter((expense) => expense.participantIds.length > 0),
-    )
-    setTransfers((current) => current.filter((transfer) => transfer.fromId !== memberId && transfer.toId !== memberId))
+    if (sharedSettlementId && canUseRemoteStore()) {
+      void deleteRemoteMember(memberId).catch(() => setRemoteStatus('참가자 삭제에 실패했어요.'))
+    } else {
+      setMembers((current) => current.filter((member) => member.id !== memberId))
+      setExpenses((current) =>
+        current
+          .filter((expense) => expense.payerId !== memberId)
+          .map((expense) => ({ ...expense, participantIds: expense.participantIds.filter((id) => id !== memberId) }))
+          .filter((expense) => expense.participantIds.length > 0),
+      )
+      setTransfers((current) => current.filter((transfer) => transfer.fromId !== memberId && transfer.toId !== memberId))
+    }
     setExpenseForm((current) => ({
       ...current,
       payerId: current.payerId === memberId ? '' : current.payerId,
@@ -343,33 +356,49 @@ function App() {
     }))
   }
 
-  const addExpense = () => {
+  const addExpense = async () => {
     const amount = evaluateAmountInput(expenseForm.amount)
     if (!expenseForm.title.trim() || !expenseForm.payerId || amount === null || amount <= 0) return
 
-    setExpenses((current) => [
-      ...current,
-      {
-        id: createId(),
-        title: expenseForm.title.trim(),
-        amount,
-        payerId: expenseForm.payerId,
-        participantIds: expenseForm.participantIds.length > 0 ? expenseForm.participantIds : [expenseForm.payerId],
-      },
-    ])
+    const expense = {
+      id: createId(),
+      title: expenseForm.title.trim(),
+      amount,
+      payerId: expenseForm.payerId,
+      participantIds: expenseForm.participantIds.length > 0 ? expenseForm.participantIds : [expenseForm.payerId],
+    }
+
+    if (sharedSettlementId && canUseRemoteStore()) {
+      try {
+        await addRemoteExpense(sharedSettlementId, expense)
+      } catch {
+        setRemoteStatus('지출 추가에 실패했어요.')
+        return
+      }
+    } else {
+      setExpenses((current) => [...current, expense])
+    }
 
     setExpenseForm((current) => ({ ...current, title: '', amount: '' }))
   }
 
-  const addTransfer = () => {
+  const addTransfer = async () => {
     const amount = evaluateAmountInput(transferForm.amount)
     if (!transferForm.fromId || !transferForm.toId || transferForm.fromId === transferForm.toId) return
     if (amount === null || amount <= 0) return
 
-    setTransfers((current) => [
-      ...current,
-      { id: createId(), amount, fromId: transferForm.fromId, toId: transferForm.toId },
-    ])
+    const transfer = { id: createId(), amount, fromId: transferForm.fromId, toId: transferForm.toId }
+
+    if (sharedSettlementId && canUseRemoteStore()) {
+      try {
+        await addRemoteTransfer(sharedSettlementId, transfer)
+      } catch {
+        setRemoteStatus('송금 추가에 실패했어요.')
+        return
+      }
+    } else {
+      setTransfers((current) => [...current, transfer])
+    }
 
     setTransferForm((current) => ({ ...current, amount: '' }))
   }
@@ -521,13 +550,19 @@ function App() {
     const amount = evaluateAmountInput(expenseEditForm.amount)
     if (!expenseEditForm.title.trim() || !expenseEditForm.payerId || amount === null || amount <= 0) return
 
-    setExpenses((current) => current.map((expense) => expense.id !== editingExpenseId ? expense : {
-      ...expense,
+    const nextExpense = {
+      id: editingExpenseId,
       title: expenseEditForm.title.trim(),
       amount,
       payerId: expenseEditForm.payerId,
       participantIds: expenseEditForm.participantIds.length > 0 ? expenseEditForm.participantIds : [expenseEditForm.payerId],
-    }))
+    }
+
+    if (sharedSettlementId && canUseRemoteStore()) {
+      void updateRemoteExpense(nextExpense).catch(() => setRemoteStatus('지출 수정에 실패했어요.'))
+    } else {
+      setExpenses((current) => current.map((expense) => expense.id !== editingExpenseId ? expense : nextExpense))
+    }
     setEditingExpenseId(null)
   }
 
@@ -537,12 +572,18 @@ function App() {
     if (!transferEditForm.fromId || !transferEditForm.toId || transferEditForm.fromId === transferEditForm.toId) return
     if (amount === null || amount <= 0) return
 
-    setTransfers((current) => current.map((transfer) => transfer.id !== editingTransferId ? transfer : {
-      ...transfer,
+    const nextTransfer = {
+      id: editingTransferId,
       amount,
       fromId: transferEditForm.fromId,
       toId: transferEditForm.toId,
-    }))
+    }
+
+    if (sharedSettlementId && canUseRemoteStore()) {
+      void updateRemoteTransfer(nextTransfer).catch(() => setRemoteStatus('송금 수정에 실패했어요.'))
+    } else {
+      setTransfers((current) => current.map((transfer) => transfer.id !== editingTransferId ? transfer : nextTransfer))
+    }
     setEditingTransferId(null)
   }
 
@@ -555,8 +596,21 @@ function App() {
     }))
   }
 
-  const removeExpense = (id: string) => setExpenses((current) => current.filter((expense) => expense.id !== id))
-  const removeTransfer = (id: string) => setTransfers((current) => current.filter((transfer) => transfer.id !== id))
+  const removeExpense = (id: string) => {
+    if (sharedSettlementId && canUseRemoteStore()) {
+      void deleteRemoteExpense(id).catch(() => setRemoteStatus('지출 삭제에 실패했어요.'))
+      return
+    }
+    setExpenses((current) => current.filter((expense) => expense.id !== id))
+  }
+
+  const removeTransfer = (id: string) => {
+    if (sharedSettlementId && canUseRemoteStore()) {
+      void deleteRemoteTransfer(id).catch(() => setRemoteStatus('송금 삭제에 실패했어요.'))
+      return
+    }
+    setTransfers((current) => current.filter((transfer) => transfer.id !== id))
+  }
 
   return (
     <div className="app-shell">
