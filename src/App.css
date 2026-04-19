@@ -288,8 +288,8 @@ th {
 
 .settlement-item,
 .history-item {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
   padding: 14px;
@@ -315,11 +315,29 @@ th {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+.history-main {
+  min-width: 0;
+}
+
+.history-main strong,
+.history-main p {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.history-amount {
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .history-side button {
   background: #e2e8f0;
   color: #0f172a;
+  min-width: 54px;
 }
 
 .history-side button:hover {
@@ -329,7 +347,13 @@ th {
 @media (max-width: 840px) {
   .two-column,
   .form-grid,
-  .inline-form {
+  .inline-form,
+  .history-item,
+  .settlement-item {
     grid-template-columns: 1fr;
+  }
+
+  .history-side {
+    justify-content: flex-end;
   }
 }

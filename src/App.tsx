@@ -621,12 +621,12 @@ function App() {
               ) : (
                 expenses.map((expense) => (
                   <div key={expense.id} className="history-item">
-                    <div>
+                    <div className="history-main">
                       <strong>{expense.title}</strong>
                       <p>{withSubjectParticle(memberMap[expense.payerId]?.name ?? '')} 결제, {expense.participantIds.map((id) => memberMap[id]?.name).join(', ')} 사용</p>
                     </div>
+                    <span className="history-amount">{currency.format(expense.amount)}</span>
                     <div className="history-side">
-                      <span>{currency.format(expense.amount)}</span>
                       <button onClick={() => openExpenseEdit(expense)}>수정</button>
                       <button onClick={() => removeExpense(expense.id)}>삭제</button>
                     </div>
@@ -642,11 +642,11 @@ function App() {
               ) : (
                 transfers.map((transfer) => (
                   <div key={transfer.id} className="history-item">
-                    <div>
+                    <div className="history-main">
                       <strong>{memberMap[transfer.fromId]?.name} → {memberMap[transfer.toId]?.name}</strong>
                     </div>
+                    <span className="history-amount">{currency.format(transfer.amount)}</span>
                     <div className="history-side">
-                      <span>{currency.format(transfer.amount)}</span>
                       <button onClick={() => openTransferEdit(transfer)}>수정</button>
                       <button onClick={() => removeTransfer(transfer.id)}>삭제</button>
                     </div>
