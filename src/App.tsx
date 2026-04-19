@@ -55,10 +55,14 @@ const currency = new Intl.NumberFormat('ko-KR', {
 const storageKey = 'travel-settlement-app-data'
 const createId = () => Math.random().toString(36).slice(2, 10)
 
+const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [] })
+
 const readStoredData = (): ImportPayload => {
+  if (shouldStartFreshFromUrl()) return emptyPayload()
+
   try {
     const raw = window.localStorage.getItem(storageKey)
-    if (!raw) return { members: [], expenses: [], transfers: [] }
+    if (!raw) return emptyPayload()
     const parsed = JSON.parse(raw) as Partial<ImportPayload>
     return {
       members: Array.isArray(parsed.members) ? parsed.members : [],
@@ -66,11 +70,14 @@ const readStoredData = (): ImportPayload => {
       transfers: Array.isArray(parsed.transfers) ? parsed.transfers : [],
     }
   } catch {
-    return { members: [], expenses: [], transfers: [] }
+    return emptyPayload()
   }
 }
 
-const getSettlementIdFromUrl = () => new URL(window.location.href).searchParams.get('settlement') ?? ''
+const getUrl = () => new URL(window.location.href)
+const getSettlementIdFromUrl = () => getUrl().searchParams.get('settlement') ?? ''
+
+const shouldStartFreshFromUrl = () => getUrl().searchParams.get('fresh') === '1'
 
 const hasBatchim = (name: string) => {
   const last = name.trim().at(-1)
@@ -119,6 +126,12 @@ function App() {
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, currentPayloadJson)
+
+    const url = getUrl()
+    if (url.searchParams.get('fresh') === '1') {
+      url.searchParams.delete('fresh')
+      window.history.replaceState({}, '', url.toString())
+    }
   }, [currentPayloadJson])
 
   useEffect(() => {
@@ -360,8 +373,9 @@ function App() {
   }
 
   const openNewSettlementWindow = () => {
-    const url = new URL(window.location.href)
+    const url = getUrl()
     url.searchParams.delete('settlement')
+    url.searchParams.set('fresh', '1')
     window.open(url.toString(), '_blank', 'noopener,noreferrer')
   }
 
