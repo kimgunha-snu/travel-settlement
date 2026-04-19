@@ -104,6 +104,8 @@ function App() {
   const [exportMessage, setExportMessage] = useState('')
   const [remoteStatus, setRemoteStatus] = useState(canUseRemoteStore() ? '공유 기능 사용 가능' : 'Supabase 환경변수 미설정')
   const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false)
+  const [shareUrl, setShareUrl] = useState('')
   const lastRemoteJsonRef = useRef('')
   const suppressNextRemoteSaveRef = useRef(false)
 
@@ -368,11 +370,12 @@ function App() {
       const url = new URL(window.location.href)
       url.searchParams.set('settlement', settlementId)
       window.history.replaceState({}, '', url.toString())
-      await navigator.clipboard.writeText(url.toString())
       lastRemoteJsonRef.current = currentPayloadJson
-      setRemoteStatus(`공유 링크를 복사했어요: ${settlementId}`)
+      setShareUrl(url.toString())
+      setIsShareModalOpen(true)
+      setRemoteStatus(`공유 링크를 만들었어요: ${settlementId}`)
     } catch {
-      setRemoteStatus('공유 링크 생성에 실패했어요. Supabase 설정과 브라우저 권한을 확인해 주세요.')
+      setRemoteStatus('공유 링크 생성에 실패했어요. Supabase 설정을 확인해 주세요.')
     }
   }
 
@@ -590,6 +593,19 @@ function App() {
           </div>
         </section>
       </main>
+
+      {isShareModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsShareModalOpen(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>공유 링크</h2>
+              <button className="ghost-button" onClick={() => setIsShareModalOpen(false)}>닫기</button>
+            </div>
+            <p className="helper">아래 URL을 복사해서 보내면 같은 정산을 함께 수정할 수 있어요.</p>
+            <textarea value={shareUrl} readOnly rows={4} />
+          </div>
+        </div>
+      )}
 
       {isImportModalOpen && (
         <div className="modal-backdrop" onClick={() => setIsImportModalOpen(false)}>
