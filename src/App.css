@@ -2,7 +2,6 @@
   min-height: 100vh;
   background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
   color: #0f172a;
-  overflow-x: hidden;
 }
 
 .hero {
@@ -178,7 +177,9 @@ button:hover {
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
+  overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
 }
 
 .horizontal-scroll > * {
