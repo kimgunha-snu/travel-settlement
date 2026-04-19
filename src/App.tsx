@@ -118,7 +118,7 @@ const hasBatchim = (name: string) => {
 const withSubjectParticle = (name: string) => `${name}${hasBatchim(name) ? '이' : '가'}`
 const withObjectParticle = (name: string) => `${name}${hasBatchim(name) ? '을' : '를'}`
 
-const normalizePayloadForRemote = (payload: SettlementPayload): SettlementPayload => {
+const normalizePayloadForRemote = (payload: SettlementPayload) => {
   const memberIdMap = new Map<string, string>()
 
   const members = payload.members.map((member) => {
@@ -141,7 +141,10 @@ const normalizePayloadForRemote = (payload: SettlementPayload): SettlementPayloa
     toId: memberIdMap.get(transfer.toId) ?? transfer.toId,
   }))
 
-  return { members, expenses, transfers }
+  return {
+    payload: { members, expenses, transfers },
+    memberIdMap,
+  }
 }
 
 function App() {
@@ -550,11 +553,31 @@ function App() {
       if (!settlementId) {
         const record = await createSettlement('공유 정산')
         settlementId = record.id
-        const normalizedPayload = normalizePayloadForRemote(currentPayload)
+        const { payload: normalizedPayload, memberIdMap } = normalizePayloadForRemote(currentPayload)
         setSharedSettlementId(settlementId)
         setMembers(normalizedPayload.members)
         setExpenses(normalizedPayload.expenses)
         setTransfers(normalizedPayload.transfers)
+        setExpenseForm((current) => ({
+          ...current,
+          payerId: memberIdMap.get(current.payerId) ?? current.payerId,
+          participantIds: current.participantIds.map((id) => memberIdMap.get(id) ?? id),
+        }))
+        setTransferForm((current) => ({
+          ...current,
+          fromId: memberIdMap.get(current.fromId) ?? current.fromId,
+          toId: memberIdMap.get(current.toId) ?? current.toId,
+        }))
+        setExpenseEditForm((current) => ({
+          ...current,
+          payerId: memberIdMap.get(current.payerId) ?? current.payerId,
+          participantIds: current.participantIds.map((id) => memberIdMap.get(id) ?? id),
+        }))
+        setTransferEditForm((current) => ({
+          ...current,
+          fromId: memberIdMap.get(current.fromId) ?? current.fromId,
+          toId: memberIdMap.get(current.toId) ?? current.toId,
+        }))
         await updateSettlement(settlementId, normalizedPayload)
       } else {
         await updateSettlement(settlementId, currentPayload)
