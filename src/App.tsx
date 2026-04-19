@@ -54,7 +54,6 @@ const currency = new Intl.NumberFormat('ko-KR', {
 })
 
 const storageKey = 'travel-settlement-app-data'
-const settlementDoneStorageKey = 'travel-settlement-app-settlement-done'
 const createId = () => Math.random().toString(36).slice(2, 10)
 
 const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [] })
@@ -70,17 +69,6 @@ const evaluateAmountInput = (value: string) => {
     return result
   } catch {
     return null
-  }
-}
-
-const readSettlementDoneMap = () => {
-  try {
-    const raw = window.localStorage.getItem(settlementDoneStorageKey)
-    if (!raw) return {} as Record<string, boolean>
-    const parsed = JSON.parse(raw) as Record<string, boolean>
-    return parsed ?? {}
-  } catch {
-    return {}
   }
 }
 
@@ -145,7 +133,6 @@ function App() {
   const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
   const [expenseEditForm, setExpenseEditForm] = useState({ title: '', amount: '', payerId: '', participantIds: [] as string[] })
   const [transferEditForm, setTransferEditForm] = useState({ amount: '', fromId: '', toId: '' })
-  const [settlementDoneMap, setSettlementDoneMap] = useState<Record<string, boolean>>(() => readSettlementDoneMap())
   const lastRemoteJsonRef = useRef('')
   const suppressNextRemoteSaveRef = useRef(false)
 
@@ -161,10 +148,6 @@ function App() {
       window.history.replaceState({}, '', url.toString())
     }
   }, [currentPayloadJson])
-
-  useEffect(() => {
-    window.localStorage.setItem(settlementDoneStorageKey, JSON.stringify(settlementDoneMap))
-  }, [settlementDoneMap])
 
   useEffect(() => {
     const settlementId = getSettlementIdFromUrl()
@@ -298,9 +281,6 @@ function App() {
 
   const allMembersSelected = members.length > 0 && expenseForm.participantIds.length === members.length
 
-  const completedSettlementCount = settlements.filter((item) => settlementDoneMap[item.id]).length
-  const remainingSettlementCount = settlements.length - completedSettlementCount
-
   const addMember = () => {
     const name = newMemberName.trim()
     if (!name) return
@@ -414,10 +394,7 @@ function App() {
     }
 
     const summary = settlements
-      .map((item) => {
-        const doneLabel = settlementDoneMap[item.id] ? ' (완료)' : ''
-        return `${memberMap[item.fromId]?.name} → ${memberMap[item.toId]?.name} ${currency.format(item.amount)}${doneLabel}`
-      })
+      .map((item) => `${memberMap[item.fromId]?.name} → ${memberMap[item.toId]?.name} ${currency.format(item.amount)}`)
       .join('\n')
 
     try {
@@ -426,6 +403,40 @@ function App() {
     } catch {
       setExportMessage('복사에 실패했어요. 브라우저 권한을 확인해 주세요.')
     }
+  }
+
+  const resetCurrentSettlement = () => {
+    const shouldReset = window.confirm('현재 정산 내용을 전부 비울까요? 이 작업은 되돌리기 어려워요.')
+    if (!shouldReset) return
+
+    setMembers([])
+    setExpenses([])
+    setTransfers([])
+    setNewMemberName('')
+    setExpenseForm({ title: '', amount: '', payerId: '', participantIds: [] })
+    setTransferForm({ amount: '', fromId: '', toId: '' })
+    setExportMessage('현재 정산을 비웠어요.')
+  }
+
+  const duplicateCurrentSettlement = () => {
+    const url = getUrl()
+    url.searchParams.delete('settlement')
+    url.searchParams.set('fresh', '1')
+    const nextWindow = window.open(url.toString(), '_blank', 'noopener,noreferrer')
+    if (!nextWindow) {
+      setExportMessage('새 창을 열지 못했어요. 팝업 차단을 확인해 주세요.')
+      return
+    }
+
+    const clonedPayload = JSON.stringify(currentPayload)
+    nextWindow.addEventListener('load', () => {
+      try {
+        nextWindow.localStorage.setItem(storageKey, clonedPayload)
+      } catch {
+        // noop
+      }
+    })
+    setExportMessage('현재 정산을 새 창으로 복제했어요.')
   }
 
   const openNewSettlementWindow = () => {
@@ -539,13 +550,6 @@ function App() {
     }))
   }
 
-  const toggleSettlementDone = (settlementId: string) => {
-    setSettlementDoneMap((current) => ({
-      ...current,
-      [settlementId]: !current[settlementId],
-    }))
-  }
-
   const removeExpense = (id: string) => setExpenses((current) => current.filter((expense) => expense.id !== id))
   const removeTransfer = (id: string) => setTransfers((current) => current.filter((transfer) => transfer.id !== id))
 
@@ -559,6 +563,8 @@ function App() {
         </div>
         <div className="hero-actions">
           <button onClick={openNewSettlementWindow}>새 정산</button>
+          <button onClick={duplicateCurrentSettlement}>현재 정산 복제</button>
+          <button onClick={resetCurrentSettlement}>전체 초기화</button>
           <button onClick={shareSettlement}>공유하기</button>
         </div>
         {(exportMessage || remoteStatus) && <p className="helper export-message compact-status">{remoteStatus}{exportMessage ? ` · ${exportMessage}` : ''}</p>}
@@ -652,7 +658,6 @@ function App() {
           <div className="section-header-with-actions">
             <div>
               <h2>자동 정산 결과</h2>
-              <p className="helper">남은 건 {remainingSettlementCount}건, 완료한 건 {completedSettlementCount}건이에요.</p>
             </div>
             <button onClick={copySettlementSummary}>정산 결과 복사</button>
           </div>
@@ -660,21 +665,14 @@ function App() {
             {settlements.length === 0 ? (
               <div className="empty">현재 추가 송금 없이도 거의 정산이 맞아떨어져요.</div>
             ) : (
-              settlements.map((settlement, index) => {
-                const isDone = Boolean(settlementDoneMap[settlement.id])
-                return (
-                  <div key={`${settlement.fromId}-${settlement.toId}-${index}`} className={`settlement-item ${isDone ? 'settlement-item-done' : ''}`}>
-                    <strong>{memberMap[settlement.fromId]?.name}</strong>
-                    <span>→</span>
-                    <strong>{memberMap[settlement.toId]?.name}</strong>
-                    <em>{currency.format(settlement.amount)}</em>
-                    <label className="settlement-done-toggle">
-                      <input type="checkbox" checked={isDone} onChange={() => toggleSettlementDone(settlement.id)} />
-                      완료
-                    </label>
-                  </div>
-                )
-              })
+              settlements.map((settlement, index) => (
+                <div key={`${settlement.fromId}-${settlement.toId}-${index}`} className="settlement-item">
+                  <strong>{memberMap[settlement.fromId]?.name}</strong>
+                  <span>→</span>
+                  <strong>{memberMap[settlement.toId]?.name}</strong>
+                  <em>{currency.format(settlement.amount)}</em>
+                </div>
+              ))
             )}
           </div>
         </section>

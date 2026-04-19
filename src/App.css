@@ -353,23 +353,6 @@ th {
   white-space: nowrap;
 }
 
-.settlement-item-done {
-  opacity: 0.6;
-  background: #f1f5f9;
-}
-
-.settlement-done-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  color: #475569;
-}
-
-.settlement-done-toggle input {
-  width: auto;
-  margin: 0;
-}
 
 .history-item p,
 .helper,
@@ -474,9 +457,6 @@ th {
     grid-column: 1 / -1;
   }
 
-  .settlement-done-toggle {
-    grid-column: 1 / -1;
-  }
 
   .mobile-balance-card div {
     display: flex;
