@@ -106,6 +106,10 @@ function App() {
   const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
   const [isShareModalOpen, setIsShareModalOpen] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
+  const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
+  const [expenseEditForm, setExpenseEditForm] = useState({ title: '', amount: '', payerId: '', participantIds: [] as string[] })
+  const [transferEditForm, setTransferEditForm] = useState({ amount: '', fromId: '', toId: '' })
   const lastRemoteJsonRef = useRef('')
   const suppressNextRemoteSaveRef = useRef(false)
 
@@ -396,6 +400,64 @@ function App() {
     }
   }
 
+  const openExpenseEdit = (expense: Expense) => {
+    setEditingExpenseId(expense.id)
+    setExpenseEditForm({
+      title: expense.title,
+      amount: String(expense.amount),
+      payerId: expense.payerId,
+      participantIds: [...expense.participantIds],
+    })
+  }
+
+  const openTransferEdit = (transfer: Transfer) => {
+    setEditingTransferId(transfer.id)
+    setTransferEditForm({
+      amount: String(transfer.amount),
+      fromId: transfer.fromId,
+      toId: transfer.toId,
+    })
+  }
+
+  const saveExpenseEdit = () => {
+    if (!editingExpenseId) return
+    const amount = Number(expenseEditForm.amount)
+    if (!expenseEditForm.title.trim() || !expenseEditForm.payerId || !Number.isFinite(amount) || amount <= 0) return
+
+    setExpenses((current) => current.map((expense) => expense.id !== editingExpenseId ? expense : {
+      ...expense,
+      title: expenseEditForm.title.trim(),
+      amount,
+      payerId: expenseEditForm.payerId,
+      participantIds: expenseEditForm.participantIds.length > 0 ? expenseEditForm.participantIds : [expenseEditForm.payerId],
+    }))
+    setEditingExpenseId(null)
+  }
+
+  const saveTransferEdit = () => {
+    if (!editingTransferId) return
+    const amount = Number(transferEditForm.amount)
+    if (!transferEditForm.fromId || !transferEditForm.toId || transferEditForm.fromId === transferEditForm.toId) return
+    if (!Number.isFinite(amount) || amount <= 0) return
+
+    setTransfers((current) => current.map((transfer) => transfer.id !== editingTransferId ? transfer : {
+      ...transfer,
+      amount,
+      fromId: transferEditForm.fromId,
+      toId: transferEditForm.toId,
+    }))
+    setEditingTransferId(null)
+  }
+
+  const toggleExpenseEditParticipant = (memberId: string) => {
+    setExpenseEditForm((current) => ({
+      ...current,
+      participantIds: current.participantIds.includes(memberId)
+        ? current.participantIds.filter((id) => id !== memberId)
+        : [...current.participantIds, memberId],
+    }))
+  }
+
   const removeExpense = (id: string) => setExpenses((current) => current.filter((expense) => expense.id !== id))
   const removeTransfer = (id: string) => setTransfers((current) => current.filter((transfer) => transfer.id !== id))
 
@@ -565,6 +627,7 @@ function App() {
                     </div>
                     <div className="history-side">
                       <span>{currency.format(expense.amount)}</span>
+                      <button onClick={() => openExpenseEdit(expense)}>수정</button>
                       <button onClick={() => removeExpense(expense.id)}>삭제</button>
                     </div>
                   </div>
@@ -584,6 +647,7 @@ function App() {
                     </div>
                     <div className="history-side">
                       <span>{currency.format(transfer.amount)}</span>
+                      <button onClick={() => openTransferEdit(transfer)}>수정</button>
                       <button onClick={() => removeTransfer(transfer.id)}>삭제</button>
                     </div>
                   </div>
@@ -603,6 +667,63 @@ function App() {
             </div>
             <p className="helper">아래 URL을 복사해서 보내면 같은 정산을 함께 수정할 수 있어요.</p>
             <textarea value={shareUrl} readOnly rows={4} />
+          </div>
+        </div>
+      )}
+
+      {editingExpenseId && (
+        <div className="modal-backdrop" onClick={() => setEditingExpenseId(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>지출 수정</h2>
+              <button className="ghost-button" onClick={() => setEditingExpenseId(null)}>닫기</button>
+            </div>
+            <div className="form-grid">
+              <input value={expenseEditForm.title} onChange={(event) => setExpenseEditForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
+              <input value={expenseEditForm.amount} onChange={(event) => setExpenseEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액" inputMode="numeric" />
+              <select value={expenseEditForm.payerId} onChange={(event) => setExpenseEditForm((current) => ({ ...current, payerId: event.target.value }))}>
+                <option value="">결제자 선택</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>{withSubjectParticle(member.name)} 결제</option>
+                ))}
+              </select>
+            </div>
+            <div className="checkbox-list">
+              {members.map((member) => (
+                <label key={member.id}>
+                  <input type="checkbox" checked={expenseEditForm.participantIds.includes(member.id)} onChange={() => toggleExpenseEditParticipant(member.id)} />
+                  {member.name}
+                </label>
+              ))}
+            </div>
+            <button onClick={saveExpenseEdit}>수정 저장</button>
+          </div>
+        </div>
+      )}
+
+      {editingTransferId && (
+        <div className="modal-backdrop" onClick={() => setEditingTransferId(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>송금 수정</h2>
+              <button className="ghost-button" onClick={() => setEditingTransferId(null)}>닫기</button>
+            </div>
+            <div className="form-grid">
+              <input value={transferEditForm.amount} onChange={(event) => setTransferEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액" inputMode="numeric" />
+              <select value={transferEditForm.fromId} onChange={(event) => setTransferEditForm((current) => ({ ...current, fromId: event.target.value }))}>
+                <option value="">보내는 사람 선택</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>{withSubjectParticle(member.name)} 보냄</option>
+                ))}
+              </select>
+              <select value={transferEditForm.toId} onChange={(event) => setTransferEditForm((current) => ({ ...current, toId: event.target.value }))}>
+                <option value="">받는 사람 선택</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>{withSubjectParticle(member.name)} 받음</option>
+                ))}
+              </select>
+            </div>
+            <button onClick={saveTransferEdit}>수정 저장</button>
           </div>
         </div>
       )}
