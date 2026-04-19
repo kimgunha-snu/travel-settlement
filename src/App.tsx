@@ -321,6 +321,7 @@ function App() {
     if (sharedSettlementId && canUseRemoteStore()) {
       try {
         await addRemoteMember(sharedSettlementId, member)
+        setMembers((current) => [...current, member])
       } catch (error) {
         const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
         setRemoteStatus(`참가자 추가 실패: ${message}`)
@@ -414,6 +415,7 @@ function App() {
     if (sharedSettlementId && canUseRemoteStore()) {
       try {
         await addRemoteExpense(sharedSettlementId, expense)
+        setExpenses((current) => [...current, expense])
       } catch (error) {
         const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
         setRemoteStatus(`지출 추가 실패: ${message}`)
@@ -446,6 +448,7 @@ function App() {
     if (sharedSettlementId && canUseRemoteStore()) {
       try {
         await addRemoteTransfer(sharedSettlementId, transfer)
+        setTransfers((current) => [...current, transfer])
       } catch (error) {
         const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
         setRemoteStatus(`송금 추가 실패: ${message}`)
@@ -628,6 +631,7 @@ function App() {
     }
 
     if (sharedSettlementId && canUseRemoteStore()) {
+      setExpenses((current) => current.map((expense) => expense.id !== editingExpenseId ? expense : nextExpense))
       void updateRemoteExpense(nextExpense).catch(() => setRemoteStatus('지출 수정에 실패했어요.'))
     } else {
       setExpenses((current) => current.map((expense) => expense.id !== editingExpenseId ? expense : nextExpense))
@@ -649,6 +653,7 @@ function App() {
     }
 
     if (sharedSettlementId && canUseRemoteStore()) {
+      setTransfers((current) => current.map((transfer) => transfer.id !== editingTransferId ? transfer : nextTransfer))
       void updateRemoteTransfer(nextTransfer).catch(() => setRemoteStatus('송금 수정에 실패했어요.'))
     } else {
       setTransfers((current) => current.map((transfer) => transfer.id !== editingTransferId ? transfer : nextTransfer))
@@ -667,6 +672,7 @@ function App() {
 
   const removeExpense = (id: string) => {
     if (sharedSettlementId && canUseRemoteStore()) {
+      setExpenses((current) => current.filter((expense) => expense.id !== id))
       void deleteRemoteExpense(id).catch(() => setRemoteStatus('지출 삭제에 실패했어요.'))
       return
     }
@@ -675,6 +681,7 @@ function App() {
 
   const removeTransfer = (id: string) => {
     if (sharedSettlementId && canUseRemoteStore()) {
+      setTransfers((current) => current.filter((transfer) => transfer.id !== id))
       void deleteRemoteTransfer(id).catch(() => setRemoteStatus('송금 삭제에 실패했어요.'))
       return
     }
