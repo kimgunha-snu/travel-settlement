@@ -506,7 +506,15 @@ function App() {
       setIsShareModalOpen(true)
       setRemoteStatus(`공유 링크를 만들었어요: ${settlementId}`)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      let message = '알 수 없는 오류'
+      if (error instanceof Error) {
+        message = error.message
+      } else if (error && typeof error === 'object') {
+        const maybeError = error as { message?: string; details?: string; hint?: string; code?: string }
+        message = [maybeError.message, maybeError.details, maybeError.hint, maybeError.code].filter(Boolean).join(' / ') || JSON.stringify(error)
+      } else {
+        message = String(error)
+      }
       setRemoteStatus(`공유 링크 생성 실패: ${message}`)
     }
   }
