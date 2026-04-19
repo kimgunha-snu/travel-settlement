@@ -627,18 +627,17 @@ function App() {
 
       const url = new URL(window.location.href)
       url.searchParams.set('settlement', settlementId)
-      if (sharedSettlementToken) {
-        url.searchParams.set('token', sharedSettlementToken)
-      } else if (!sharedSettlementId) {
-        url.searchParams.set('token', getSettlementTokenFromUrl() || '')
+
+      let token = sharedSettlementToken
+      if (!token) {
+        const latestRecord = await getSettlementById(settlementId)
+        token = latestRecord.share_token
+        setSharedSettlementToken(token)
       }
+
+      url.searchParams.set('token', token)
       window.history.replaceState({}, '', url.toString())
       lastRemoteJsonRef.current = currentPayloadJson
-      if (!sharedSettlementId) {
-        const latestRecord = await getSettlementById(settlementId)
-        setSharedSettlementToken(latestRecord.share_token)
-        url.searchParams.set('token', latestRecord.share_token)
-      }
       setShareUrl(url.toString())
       setIsShareModalOpen(true)
       setRemoteStatus(`공유 링크를 만들었어요: ${settlementId}`)
