@@ -125,6 +125,8 @@ function App() {
   const [importText, setImportText] = useState('')
   const [importMessage, setImportMessage] = useState('내보낸 데이터(JSON)를 붙여넣으면 지금 상태를 그대로 복구할 수 있어요.')
   const [exportMessage, setExportMessage] = useState('')
+  const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false)
+  const [summaryText, setSummaryText] = useState('')
   const [remoteStatus, setRemoteStatus] = useState(canUseRemoteStore() ? '공유 기능 사용 가능' : 'Supabase 환경변수 미설정')
   const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
   const [isShareModalOpen, setIsShareModalOpen] = useState(false)
@@ -397,11 +399,14 @@ function App() {
       .map((item) => `${memberMap[item.fromId]?.name} → ${memberMap[item.toId]?.name} ${currency.format(item.amount)}`)
       .join('\n')
 
+    setSummaryText(summary)
+    setIsSummaryModalOpen(true)
+
     try {
       await navigator.clipboard.writeText(summary)
       setExportMessage('자동 정산 결과를 복사했어요.')
     } catch {
-      setExportMessage('복사에 실패했어요. 브라우저 권한을 확인해 주세요.')
+      setExportMessage('클립보드 복사가 안 돼서 결과 창을 열어뒀어요. 직접 복사해 주세요.')
     }
   }
 
@@ -563,8 +568,6 @@ function App() {
         </div>
         <div className="hero-actions">
           <button onClick={openNewSettlementWindow}>새 정산</button>
-          <button onClick={duplicateCurrentSettlement}>현재 정산 복제</button>
-          <button onClick={resetCurrentSettlement}>전체 초기화</button>
           <button onClick={shareSettlement}>공유하기</button>
         </div>
         {(exportMessage || remoteStatus) && <p className="helper export-message compact-status">{remoteStatus}{exportMessage ? ` · ${exportMessage}` : ''}</p>}
@@ -799,9 +802,24 @@ function App() {
           <div className="hero-actions">
             <button onClick={() => setIsImportModalOpen(true)}>Import</button>
             <button onClick={exportData}>Export</button>
+            <button onClick={duplicateCurrentSettlement}>현재 정산 복제</button>
+            <button onClick={resetCurrentSettlement}>전체 초기화</button>
           </div>
         </section>
       </main>
+
+      {isSummaryModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsSummaryModalOpen(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>정산 결과</h2>
+              <button className="ghost-button" onClick={() => setIsSummaryModalOpen(false)}>닫기</button>
+            </div>
+            <p className="helper">클립보드 복사가 안 되면 아래 내용을 직접 복사해 쓰면 돼요.</p>
+            <textarea value={summaryText} readOnly rows={8} />
+          </div>
+        </div>
+      )}
 
       {isShareModalOpen && (
         <div className="modal-backdrop" onClick={() => setIsShareModalOpen(false)}>
