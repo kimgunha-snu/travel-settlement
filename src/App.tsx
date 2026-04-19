@@ -106,6 +106,7 @@ const readStoredData = (): ImportPayload => {
 const getUrl = () => new URL(window.location.href)
 const getSettlementIdFromUrl = () => getUrl().searchParams.get('settlement') ?? ''
 const getSettlementTokenFromUrl = () => getUrl().searchParams.get('token') ?? ''
+const getShareTokenFromUrl = () => getUrl().searchParams.get('share') ?? ''
 
 const shouldStartFreshFromUrl = () => getUrl().searchParams.get('fresh') === '1'
 
@@ -173,7 +174,7 @@ function App() {
   const [summaryText, setSummaryText] = useState('')
   const [remoteStatus, setRemoteStatus] = useState(canUseRemoteStore() ? '공유 기능 사용 가능' : 'Supabase 환경변수 미설정')
   const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
-  const [sharedSettlementToken, setSharedSettlementToken] = useState(() => getSettlementTokenFromUrl())
+  const [sharedSettlementToken, setSharedSettlementToken] = useState(() => getShareTokenFromUrl() || getSettlementTokenFromUrl())
   const [isShareModalOpen, setIsShareModalOpen] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
@@ -197,9 +198,9 @@ function App() {
   }, [currentPayloadJson])
 
   useEffect(() => {
-    const settlementId = getSettlementIdFromUrl()
-    const settlementToken = getSettlementTokenFromUrl()
-    if (!settlementId || !settlementToken) return
+    getSettlementIdFromUrl()
+    const settlementToken = getShareTokenFromUrl() || getSettlementTokenFromUrl()
+    if (!settlementToken) return
     if (!canUseRemoteStore()) {
       setRemoteStatus('URL에 공유 정산 ID가 있지만 Supabase 환경변수가 없어요.')
       return
@@ -281,8 +282,9 @@ function App() {
   useEffect(() => {
     if (!sharedSettlementId || !sharedSettlementToken) return
     const url = getUrl()
-    url.searchParams.set('settlement', sharedSettlementId)
-    url.searchParams.set('token', sharedSettlementToken)
+    url.searchParams.delete('settlement')
+    url.searchParams.delete('token')
+    url.searchParams.set('share', sharedSettlementToken)
     setShareUrl(url.toString())
   }, [sharedSettlementId, sharedSettlementToken])
 
@@ -617,7 +619,6 @@ function App() {
       }
 
       const url = new URL(window.location.href)
-      url.searchParams.set('settlement', settlementId)
 
       let token = sharedSettlementToken
       if (!token) {
@@ -626,7 +627,9 @@ function App() {
         setSharedSettlementToken(token)
       }
 
-      url.searchParams.set('token', token)
+      url.searchParams.delete('settlement')
+      url.searchParams.delete('token')
+      url.searchParams.set('share', token)
       window.history.replaceState({}, '', url.toString())
       lastRemoteJsonRef.current = currentPayloadJson
       setShareUrl(url.toString())
