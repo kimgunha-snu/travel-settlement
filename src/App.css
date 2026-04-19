@@ -173,6 +173,18 @@ button:hover {
   margin-top: 14px;
 }
 
+.horizontal-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.horizontal-scroll > * {
+  min-width: 560px;
+}
+
 textarea {
   width: 100%;
   box-sizing: border-box;
@@ -309,7 +321,7 @@ th {
 .settlement-item,
 .history-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
   align-items: center;
   gap: 12px;
   padding: 14px;
@@ -374,9 +386,7 @@ th {
 @media (max-width: 840px) {
   .two-column,
   .form-grid,
-  .inline-form,
-  .history-item,
-  .settlement-item {
+  .inline-form {
     grid-template-columns: 1fr;
   }
 

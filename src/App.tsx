@@ -639,7 +639,8 @@ function App() {
           <div>
             <h2>입력된 내역</h2>
             <h3>지출</h3>
-            <div className="history-list">
+            <div className="horizontal-scroll">
+              <div className="history-list">
               {expenses.length === 0 ? (
                 <div className="empty">아직 입력된 지출이 없어요.</div>
               ) : (
@@ -657,10 +658,12 @@ function App() {
                   </div>
                 ))
               )}
+              </div>
             </div>
 
             <h3>송금</h3>
-            <div className="history-list">
+            <div className="horizontal-scroll">
+              <div className="history-list">
               {transfers.length === 0 ? (
                 <div className="empty">아직 기록된 송금이 없어요.</div>
               ) : (
@@ -677,6 +680,7 @@ function App() {
                   </div>
                 ))
               )}
+              </div>
             </div>
           </div>
         </section>
