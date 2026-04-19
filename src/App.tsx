@@ -806,7 +806,7 @@ function App() {
             <h2>지출 추가</h2>
             <div className="form-grid">
               <input value={expenseForm.title} onChange={(event) => setExpenseForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
-              <input value={expenseForm.amount} onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액 (예: 12000+8000)" inputMode="numeric" />
+              <input value={expenseForm.amount} onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액 (예: 12000+8000)" inputMode="text" />
               <select value={expenseForm.payerId} onChange={(event) => setExpenseForm((current) => ({ ...current, payerId: event.target.value }))}>
                 <option value="">결제자 선택</option>
                 {members.map((member) => (
@@ -837,7 +837,7 @@ function App() {
           <div className="form-section">
             <h2>송금 기록</h2>
             <div className="form-grid">
-              <input value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액 (예: 5000+2500)" inputMode="numeric" />
+              <input value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액 (예: 5000+2500)" inputMode="text" />
               <select value={transferForm.fromId} onChange={(event) => setTransferForm((current) => ({ ...current, fromId: event.target.value }))}>
                 <option value="">보내는 사람 선택</option>
                 {members.map((member) => (
@@ -1041,7 +1041,7 @@ function App() {
             </div>
             <div className="form-grid">
               <input value={expenseEditForm.title} onChange={(event) => setExpenseEditForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
-              <input value={expenseEditForm.amount} onChange={(event) => setExpenseEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액 (예: 12000+8000)" inputMode="numeric" />
+              <input value={expenseEditForm.amount} onChange={(event) => setExpenseEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액 (예: 12000+8000)" inputMode="text" />
               <select value={expenseEditForm.payerId} onChange={(event) => setExpenseEditForm((current) => ({ ...current, payerId: event.target.value }))}>
                 <option value="">결제자 선택</option>
                 {members.map((member) => (
@@ -1070,7 +1070,7 @@ function App() {
               <button className="ghost-button" onClick={() => setEditingTransferId(null)}>닫기</button>
             </div>
             <div className="form-grid">
-              <input value={transferEditForm.amount} onChange={(event) => setTransferEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액 (예: 5000+2500)" inputMode="numeric" />
+              <input value={transferEditForm.amount} onChange={(event) => setTransferEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액 (예: 5000+2500)" inputMode="text" />
               <select value={transferEditForm.fromId} onChange={(event) => setTransferEditForm((current) => ({ ...current, fromId: event.target.value }))}>
                 <option value="">보내는 사람 선택</option>
                 {members.map((member) => (
