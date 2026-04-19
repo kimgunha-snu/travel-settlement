@@ -234,7 +234,10 @@ function App() {
 
     const applyRemoteRecord = (record: { id: string; data: SettlementPayload }, source: 'realtime' | 'polling') => {
       const nextJson = JSON.stringify(record.data)
-      if (nextJson === lastRemoteJsonRef.current) return
+      if (nextJson === lastRemoteJsonRef.current) {
+        if (source === 'realtime') setSyncDebugStatus('realtime-noop-same-data')
+        return
+      }
       suppressNextRemoteSaveRef.current = true
       lastRemoteJsonRef.current = nextJson
       setMembers(record.data.members)
@@ -244,7 +247,7 @@ function App() {
       setSyncDebugStatus(source)
     }
 
-    const unsubscribe = subscribeSettlement(sharedSettlementId, (record) => applyRemoteRecord(record, 'realtime'))
+    const unsubscribe = subscribeSettlement(sharedSettlementId, (record) => applyRemoteRecord(record, 'realtime'), setSyncDebugStatus)
 
     const interval = window.setInterval(async () => {
       try {

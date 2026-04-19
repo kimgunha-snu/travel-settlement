@@ -238,22 +238,33 @@ export const deleteRemoteTransfer = async (transferId: string) => {
   if (error) throw error
 }
 
-export const subscribeSettlement = (id: string, onData: (record: SettlementRecord) => void) => {
+export const subscribeSettlement = (
+  id: string,
+  onData: (record: SettlementRecord) => void,
+  onDebug?: (status: string) => void,
+) => {
   if (!supabase) throw new Error('Supabase is not configured')
 
   const client = supabase
+  const emit = async (source: string) => {
+    onDebug?.(`realtime-event:${source}`)
+    onData(await getSettlement(id))
+  }
+
   const channel = client
     .channel(`settlement-rows:${id}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: membersTable, filter: `settlement_id=eq.${id}` }, async () => {
-      onData(await getSettlement(id))
+      await emit('members')
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: expensesTable, filter: `settlement_id=eq.${id}` }, async () => {
-      onData(await getSettlement(id))
+      await emit('expenses')
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: transfersTable, filter: `settlement_id=eq.${id}` }, async () => {
-      onData(await getSettlement(id))
+      await emit('transfers')
     })
-    .subscribe()
+    .subscribe((status) => {
+      onDebug?.(`channel:${status}`)
+    })
 
   return () => {
     void client.removeChannel(channel)
