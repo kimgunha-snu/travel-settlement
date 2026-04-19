@@ -944,7 +944,7 @@ function App() {
                   <div key={expense.id} className="history-item">
                     <div className="history-main">
                       <strong>{expense.title}</strong>
-                      <p>{withSubjectParticle(memberMap[expense.payerId]?.name ?? '')} 결제, {expense.participantIds.map((id) => memberMap[id]?.name).join(', ')} 사용</p>
+                      <p>{withSubjectParticle(memberMap[expense.payerId]?.name ?? '')} 결제, {expense.participantIds.map((id) => memberMap[id]?.name).filter(Boolean).join(', ')} 사용</p>
                     </div>
                     <span className="history-amount">{currency.format(expense.amount)}</span>
                     <div className="history-side">
@@ -963,7 +963,7 @@ function App() {
                   <div key={expense.id} className="mobile-history-card">
                     <strong>{expense.title}</strong>
                     <p>{withSubjectParticle(memberMap[expense.payerId]?.name ?? '')} 결제</p>
-                    <p>{expense.participantIds.map((id) => memberMap[id]?.name).join(', ')} 사용</p>
+                    <p>{expense.participantIds.map((id) => memberMap[id]?.name).filter(Boolean).join(', ')} 사용</p>
                     <em className="history-amount">{currency.format(expense.amount)}</em>
                     <div className="history-side">
                       <button onClick={() => openExpenseEdit(expense)}>수정</button>
