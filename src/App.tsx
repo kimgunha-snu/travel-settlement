@@ -490,9 +490,10 @@ function App() {
       let settlementId = sharedSettlementId
 
       if (!settlementId) {
-        const record = await createSettlement('공유 정산', currentPayload)
+        const record = await createSettlement('공유 정산')
         settlementId = record.id
         setSharedSettlementId(settlementId)
+        await updateSettlement(settlementId, currentPayload)
       } else {
         await updateSettlement(settlementId, currentPayload)
       }
