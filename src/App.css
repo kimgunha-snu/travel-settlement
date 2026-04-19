@@ -2,6 +2,7 @@
   min-height: 100vh;
   background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
   color: #0f172a;
+  overflow-x: hidden;
 }
 
 .hero {
@@ -67,6 +68,7 @@
   border-radius: 20px;
   padding: 20px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  min-width: 0;
 }
 
 .two-column {
@@ -74,6 +76,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
   align-items: start;
+  min-width: 0;
 }
 
 h2,
@@ -107,6 +110,7 @@ h3 {
 .form-section {
   display: grid;
   gap: 16px;
+  min-width: 0;
 }
 
 input,
@@ -255,7 +259,10 @@ textarea {
 }
 
 .table-wrap {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
 }
 
