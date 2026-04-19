@@ -208,6 +208,8 @@ function App() {
       return
     }
 
+    setRemoteStatus('공유 정산 연결 중...')
+
     let isCancelled = false
 
     const load = async () => {
@@ -223,6 +225,7 @@ function App() {
         setTransfers(record.data.transfers)
         setRemoteStatus(`공유 정산 연결됨: ${record.id}`)
         setSyncDebugStatus('initial-load')
+        setShareUrl(window.location.href)
       } catch {
         if (isCancelled) return
         setRemoteStatus('공유 정산을 불러오지 못했어요. URL을 확인해 주세요.')
@@ -283,6 +286,14 @@ function App() {
 
     lastRemoteJsonRef.current = currentPayloadJson
   }, [sharedSettlementId, currentPayloadJson])
+
+  useEffect(() => {
+    if (!sharedSettlementId || !sharedSettlementToken) return
+    const url = getUrl()
+    url.searchParams.set('settlement', sharedSettlementId)
+    url.searchParams.set('token', sharedSettlementToken)
+    setShareUrl(url.toString())
+  }, [sharedSettlementId, sharedSettlementToken])
 
   const memberMap = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members])
 
