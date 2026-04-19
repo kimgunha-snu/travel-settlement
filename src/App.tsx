@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
 type Member = {
@@ -36,12 +36,20 @@ type Settlement = {
   amount: number
 }
 
+type ImportExpenseRow = {
+  title: string
+  amount: string
+  payer: string
+  participants: string
+}
+
 const currency = new Intl.NumberFormat('ko-KR', {
   style: 'currency',
   currency: 'KRW',
   maximumFractionDigits: 0,
 })
 
+const storageKey = 'travel-settlement-app-data'
 const createId = () => Math.random().toString(36).slice(2, 10)
 
 const hasBatchim = (name: string) => {
@@ -53,6 +61,13 @@ const hasBatchim = (name: string) => {
 }
 
 const withSubjectParticle = (name: string) => `${name}${hasBatchim(name) ? '이' : '가'}`
+
+const parseDelimited = (raw: string) =>
+  raw
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.split(/\t|,/).map((cell) => cell.trim()))
+    .filter((row) => row.some(Boolean))
 
 function App() {
   const [members, setMembers] = useState<Member[]>([])
@@ -70,6 +85,25 @@ function App() {
     fromId: '',
     toId: '',
   })
+  const [importText, setImportText] = useState('')
+  const [importMessage, setImportMessage] = useState('엑셀이나 CSV 행을 붙여넣으면 지출 내역으로 가져올 수 있어요.')
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(storageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { members?: Member[]; expenses?: Expense[]; transfers?: Transfer[] }
+      setMembers(parsed.members ?? [])
+      setExpenses(parsed.expenses ?? [])
+      setTransfers(parsed.transfers ?? [])
+    } catch {
+      // ignore broken local data
+    }
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKey, JSON.stringify({ members, expenses, transfers }))
+  }, [members, expenses, transfers])
 
   const memberMap = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members])
 
@@ -110,15 +144,8 @@ function App() {
   }, [expenses, members, transfers])
 
   const settlements = useMemo<Settlement[]>(() => {
-    const creditors = balances
-      .filter((row) => row.net > 0.5)
-      .map((row) => ({ memberId: row.memberId, amount: row.net }))
-      .sort((a, b) => b.amount - a.amount)
-    const debtors = balances
-      .filter((row) => row.net < -0.5)
-      .map((row) => ({ memberId: row.memberId, amount: -row.net }))
-      .sort((a, b) => b.amount - a.amount)
-
+    const creditors = balances.filter((row) => row.net > 0.5).map((row) => ({ memberId: row.memberId, amount: row.net }))
+    const debtors = balances.filter((row) => row.net < -0.5).map((row) => ({ memberId: row.memberId, amount: -row.net }))
     const result: Settlement[] = []
     let i = 0
     let j = 0
@@ -127,12 +154,9 @@ function App() {
       const debtor = debtors[i]
       const creditor = creditors[j]
       const amount = Math.min(debtor.amount, creditor.amount)
-
       result.push({ fromId: debtor.memberId, toId: creditor.memberId, amount })
-
       debtor.amount -= amount
       creditor.amount -= amount
-
       if (debtor.amount <= 0.5) i += 1
       if (creditor.amount <= 0.5) j += 1
     }
@@ -145,7 +169,6 @@ function App() {
   const addMember = () => {
     const name = newMemberName.trim()
     if (!name) return
-
     const member = { id: createId(), name }
     setMembers((current) => [...current, member])
     setExpenseForm((current) => ({
@@ -166,10 +189,7 @@ function App() {
     setExpenses((current) =>
       current
         .filter((expense) => expense.payerId !== memberId)
-        .map((expense) => ({
-          ...expense,
-          participantIds: expense.participantIds.filter((id) => id !== memberId),
-        }))
+        .map((expense) => ({ ...expense, participantIds: expense.participantIds.filter((id) => id !== memberId) }))
         .filter((expense) => expense.participantIds.length > 0),
     )
     setTransfers((current) => current.filter((transfer) => transfer.fromId !== memberId && transfer.toId !== memberId))
@@ -226,15 +246,77 @@ function App() {
 
     setTransfers((current) => [
       ...current,
-      {
-        id: createId(),
-        amount,
-        fromId: transferForm.fromId,
-        toId: transferForm.toId,
-      },
+      { id: createId(), amount, fromId: transferForm.fromId, toId: transferForm.toId },
     ])
 
     setTransferForm((current) => ({ ...current, amount: '' }))
+  }
+
+  const importExpenses = () => {
+    const rows = parseDelimited(importText)
+    if (rows.length === 0) {
+      setImportMessage('붙여넣은 데이터가 비어 있어요.')
+      return
+    }
+
+    const [header, ...dataRows] = rows
+    const normalizedHeader = header.map((cell) => cell.toLowerCase())
+    const hasHeader = normalizedHeader.some((cell) => ['title', '항목', 'amount', '금액', 'payer', '결제자', 'participants', '참여자'].includes(cell))
+    const rowsToUse = hasHeader ? dataRows : rows
+
+    const parsedRows: ImportExpenseRow[] = rowsToUse
+      .map((row) => ({
+        title: row[0] ?? '',
+        amount: row[1] ?? '',
+        payer: row[2] ?? '',
+        participants: row[3] ?? '',
+      }))
+      .filter((row) => row.title || row.amount || row.payer)
+
+    if (parsedRows.length === 0) {
+      setImportMessage('가져올 수 있는 행이 없어요. 형식: 항목명, 금액, 결제자, 참여자')
+      return
+    }
+
+    const stagedMembers = new Map(members.map((member) => [member.name, member.id]))
+    const ensureImportedMember = (name: string) => {
+      const trimmed = name.trim()
+      if (!trimmed) return null
+      if (stagedMembers.has(trimmed)) return stagedMembers.get(trimmed)!
+      const id = createId()
+      stagedMembers.set(trimmed, id)
+      return id
+    }
+
+    const newExpenses: Expense[] = []
+    parsedRows.forEach((row) => {
+      const amount = Number(row.amount.replace(/,/g, ''))
+      const payerId = ensureImportedMember(row.payer)
+      const participantIds = (row.participants || row.payer)
+        .split(/[\/|,]/)
+        .map((name) => ensureImportedMember(name))
+        .filter((id): id is string => Boolean(id))
+
+      if (!row.title.trim() || !payerId || !Number.isFinite(amount) || amount <= 0) return
+      newExpenses.push({
+        id: createId(),
+        title: row.title.trim(),
+        amount,
+        payerId,
+        participantIds: participantIds.length > 0 ? participantIds : [payerId],
+      })
+    })
+
+    if (newExpenses.length === 0) {
+      setImportMessage('가져올 수 있는 지출이 없어요. 형식을 다시 확인해 주세요.')
+      return
+    }
+
+    const nextMembers = Array.from(stagedMembers.entries()).map(([name, id]) => ({ id, name }))
+    setMembers(nextMembers)
+    setExpenses((current) => [...current, ...newExpenses])
+    setImportText('')
+    setImportMessage(`${newExpenses.length}개의 지출을 가져왔어요.`)
   }
 
   const removeExpense = (id: string) => setExpenses((current) => current.filter((expense) => expense.id !== id))
@@ -280,6 +362,16 @@ function App() {
           </div>
         </section>
 
+        <section className="panel">
+          <h2>엑셀/CSV 붙여넣기 import</h2>
+          <p className="helper">형식 예시: 항목명, 금액, 결제자, 참여자1/참여자2/참여자3</p>
+          <textarea value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={`숙소,180000,건하,건하/현민/지오\n저녁,72000,현민,건하/현민/지오`} rows={5} />
+          <div className="import-actions">
+            <button onClick={importExpenses}>붙여넣은 지출 가져오기</button>
+            <span className="helper">{importMessage}</span>
+          </div>
+        </section>
+
         <section className="panel two-column">
           <div className="form-section">
             <h2>지출 추가</h2>
@@ -289,9 +381,7 @@ function App() {
               <select value={expenseForm.payerId} onChange={(event) => setExpenseForm((current) => ({ ...current, payerId: event.target.value }))}>
                 <option value="">결제자 선택</option>
                 {members.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {withSubjectParticle(member.name)} 결제
-                  </option>
+                  <option key={member.id} value={member.id}>{withSubjectParticle(member.name)} 결제</option>
                 ))}
               </select>
             </div>
@@ -322,17 +412,13 @@ function App() {
               <select value={transferForm.fromId} onChange={(event) => setTransferForm((current) => ({ ...current, fromId: event.target.value }))}>
                 <option value="">보내는 사람 선택</option>
                 {members.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {withSubjectParticle(member.name)} 보냄
-                  </option>
+                  <option key={member.id} value={member.id}>{withSubjectParticle(member.name)} 보냄</option>
                 ))}
               </select>
               <select value={transferForm.toId} onChange={(event) => setTransferForm((current) => ({ ...current, toId: event.target.value }))}>
                 <option value="">받는 사람 선택</option>
                 {members.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {withSubjectParticle(member.name)} 받음
-                  </option>
+                  <option key={member.id} value={member.id}>{withSubjectParticle(member.name)} 받음</option>
                 ))}
               </select>
             </div>
@@ -377,10 +463,7 @@ function App() {
                       <td>{memberMap[row.memberId]?.name}</td>
                       <td>{currency.format(row.paid)}</td>
                       <td>{currency.format(row.share)}</td>
-                      <td className={row.net >= 0 ? 'positive' : 'negative'}>
-                        {row.net >= 0 ? '+' : '-'}
-                        {currency.format(Math.abs(row.net))}
-                      </td>
+                      <td className={row.net >= 0 ? 'positive' : 'negative'}>{row.net >= 0 ? '+' : '-'}{currency.format(Math.abs(row.net))}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -141,6 +141,26 @@ button:hover {
   margin-top: 14px;
 }
 
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 120px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font: inherit;
+}
+
+.import-actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
