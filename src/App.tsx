@@ -36,11 +36,10 @@ type Settlement = {
   amount: number
 }
 
-type ImportExpenseRow = {
-  title: string
-  amount: string
-  payer: string
-  participants: string
+type ImportPayload = {
+  members: Member[]
+  expenses: Expense[]
+  transfers: Transfer[]
 }
 
 const currency = new Intl.NumberFormat('ko-KR', {
@@ -62,13 +61,6 @@ const hasBatchim = (name: string) => {
 
 const withSubjectParticle = (name: string) => `${name}${hasBatchim(name) ? '이' : '가'}`
 
-const parseDelimited = (raw: string) =>
-  raw
-    .trim()
-    .split(/\r?\n/)
-    .map((line) => line.split(/\t|,/).map((cell) => cell.trim()))
-    .filter((row) => row.some(Boolean))
-
 function App() {
   const [members, setMembers] = useState<Member[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -85,14 +77,16 @@ function App() {
     fromId: '',
     toId: '',
   })
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [importText, setImportText] = useState('')
-  const [importMessage, setImportMessage] = useState('엑셀이나 CSV 행을 붙여넣으면 지출 내역으로 가져올 수 있어요.')
+  const [importMessage, setImportMessage] = useState('내보낸 데이터(JSON)를 붙여넣으면 지금 상태를 그대로 복구할 수 있어요.')
+  const [exportMessage, setExportMessage] = useState('')
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(storageKey)
       if (!raw) return
-      const parsed = JSON.parse(raw) as { members?: Member[]; expenses?: Expense[]; transfers?: Transfer[] }
+      const parsed = JSON.parse(raw) as ImportPayload
       setMembers(parsed.members ?? [])
       setExpenses(parsed.expenses ?? [])
       setTransfers(parsed.transfers ?? [])
@@ -169,6 +163,7 @@ function App() {
   const addMember = () => {
     const name = newMemberName.trim()
     if (!name) return
+
     const member = { id: createId(), name }
     setMembers((current) => [...current, member])
     setExpenseForm((current) => ({
@@ -252,71 +247,28 @@ function App() {
     setTransferForm((current) => ({ ...current, amount: '' }))
   }
 
-  const importExpenses = () => {
-    const rows = parseDelimited(importText)
-    if (rows.length === 0) {
-      setImportMessage('붙여넣은 데이터가 비어 있어요.')
-      return
+  const exportData = async () => {
+    const payload: ImportPayload = { members, expenses, transfers }
+    const text = JSON.stringify(payload, null, 2)
+    await navigator.clipboard.writeText(text)
+    setExportMessage('현재 정산 데이터를 JSON으로 클립보드에 복사했어요.')
+  }
+
+  const importData = () => {
+    try {
+      const parsed = JSON.parse(importText) as ImportPayload
+      if (!Array.isArray(parsed.members) || !Array.isArray(parsed.expenses) || !Array.isArray(parsed.transfers)) {
+        throw new Error('invalid')
+      }
+      setMembers(parsed.members)
+      setExpenses(parsed.expenses)
+      setTransfers(parsed.transfers)
+      setImportMessage('가져오기에 성공했어요. 이전 상태를 그대로 복구했습니다.')
+      setIsImportModalOpen(false)
+      setImportText('')
+    } catch {
+      setImportMessage('가져오기에 실패했어요. export한 JSON 전체를 그대로 붙여넣어 주세요.')
     }
-
-    const [header, ...dataRows] = rows
-    const normalizedHeader = header.map((cell) => cell.toLowerCase())
-    const hasHeader = normalizedHeader.some((cell) => ['title', '항목', 'amount', '금액', 'payer', '결제자', 'participants', '참여자'].includes(cell))
-    const rowsToUse = hasHeader ? dataRows : rows
-
-    const parsedRows: ImportExpenseRow[] = rowsToUse
-      .map((row) => ({
-        title: row[0] ?? '',
-        amount: row[1] ?? '',
-        payer: row[2] ?? '',
-        participants: row[3] ?? '',
-      }))
-      .filter((row) => row.title || row.amount || row.payer)
-
-    if (parsedRows.length === 0) {
-      setImportMessage('가져올 수 있는 행이 없어요. 형식: 항목명, 금액, 결제자, 참여자')
-      return
-    }
-
-    const stagedMembers = new Map(members.map((member) => [member.name, member.id]))
-    const ensureImportedMember = (name: string) => {
-      const trimmed = name.trim()
-      if (!trimmed) return null
-      if (stagedMembers.has(trimmed)) return stagedMembers.get(trimmed)!
-      const id = createId()
-      stagedMembers.set(trimmed, id)
-      return id
-    }
-
-    const newExpenses: Expense[] = []
-    parsedRows.forEach((row) => {
-      const amount = Number(row.amount.replace(/,/g, ''))
-      const payerId = ensureImportedMember(row.payer)
-      const participantIds = (row.participants || row.payer)
-        .split(/[\/|,]/)
-        .map((name) => ensureImportedMember(name))
-        .filter((id): id is string => Boolean(id))
-
-      if (!row.title.trim() || !payerId || !Number.isFinite(amount) || amount <= 0) return
-      newExpenses.push({
-        id: createId(),
-        title: row.title.trim(),
-        amount,
-        payerId,
-        participantIds: participantIds.length > 0 ? participantIds : [payerId],
-      })
-    })
-
-    if (newExpenses.length === 0) {
-      setImportMessage('가져올 수 있는 지출이 없어요. 형식을 다시 확인해 주세요.')
-      return
-    }
-
-    const nextMembers = Array.from(stagedMembers.entries()).map(([name, id]) => ({ id, name }))
-    setMembers(nextMembers)
-    setExpenses((current) => [...current, ...newExpenses])
-    setImportText('')
-    setImportMessage(`${newExpenses.length}개의 지출을 가져왔어요.`)
   }
 
   const removeExpense = (id: string) => setExpenses((current) => current.filter((expense) => expense.id !== id))
@@ -330,6 +282,11 @@ function App() {
           <h1>누가 얼마를 내고, 받아야 하는지 한 번에 정리</h1>
           <p className="subtitle">여행 중 사용한 돈, 송금 내역, 같이 쓴 사람만 넣으면 자동으로 정산 결과를 계산해줘요.</p>
         </div>
+        <div className="hero-actions">
+          <button onClick={() => setIsImportModalOpen(true)}>Import</button>
+          <button onClick={exportData}>Export</button>
+        </div>
+        {exportMessage && <p className="helper export-message">{exportMessage}</p>}
       </header>
 
       <main className="layout">
@@ -359,16 +316,6 @@ function App() {
                 </span>
               ))
             )}
-          </div>
-        </section>
-
-        <section className="panel">
-          <h2>엑셀/CSV 붙여넣기 import</h2>
-          <p className="helper">형식 예시: 항목명, 금액, 결제자, 참여자1/참여자2/참여자3</p>
-          <textarea value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={`숙소,180000,건하,건하/현민/지오\n저녁,72000,현민,건하/현민/지오`} rows={5} />
-          <div className="import-actions">
-            <button onClick={importExpenses}>붙여넣은 지출 가져오기</button>
-            <span className="helper">{importMessage}</span>
           </div>
         </section>
 
@@ -514,6 +461,23 @@ function App() {
           </div>
         </section>
       </main>
+
+      {isImportModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsImportModalOpen(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Import</h2>
+              <button className="ghost-button" onClick={() => setIsImportModalOpen(false)}>닫기</button>
+            </div>
+            <p className="helper">Export한 JSON 전체를 그대로 붙여넣으면 현재 상태를 복구할 수 있어요.</p>
+            <textarea value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='{"members":[],"expenses":[],"transfers":[]}' rows={10} />
+            <div className="import-actions">
+              <button onClick={importData}>불러오기</button>
+              <span className="helper">{importMessage}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

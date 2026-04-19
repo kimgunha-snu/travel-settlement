@@ -8,6 +8,22 @@
   max-width: 1100px;
   margin: 0 auto;
   padding: 48px 20px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.export-message {
+  width: 100%;
 }
 
 .eyebrow {
@@ -151,6 +167,43 @@ textarea {
   border: 1px solid #cbd5e1;
   background: #fff;
   font: inherit;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 10;
+}
+
+.modal-card {
+  width: min(720px, 100%);
+  background: #fff;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.2);
+  display: grid;
+  gap: 16px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.ghost-button {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.ghost-button:hover {
+  background: #cbd5e1;
 }
 
 .import-actions {
