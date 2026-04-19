@@ -792,19 +792,6 @@ function App() {
             <h2>참가자</h2>
             <button onClick={() => setIsMembersModalOpen(true)}>참가자 관리</button>
           </div>
-          <div className="inline-form">
-            <input
-              value={newMemberName}
-              onChange={(event) => setNewMemberName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter') return
-                event.preventDefault()
-                addMember()
-              }}
-              placeholder="이름 추가"
-            />
-            <button onClick={addMember}>추가</button>
-          </div>
           <div className="chips">
             {members.length === 0 ? (
               <div className="empty">아직 참가자가 없어요.</div>
