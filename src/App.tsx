@@ -170,6 +170,7 @@ function App() {
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false)
   const [summaryText, setSummaryText] = useState('')
   const [remoteStatus, setRemoteStatus] = useState(canUseRemoteStore() ? '공유 기능 사용 가능' : 'Supabase 환경변수 미설정')
+  const [syncDebugStatus, setSyncDebugStatus] = useState('idle')
   const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
   const [isShareModalOpen, setIsShareModalOpen] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
@@ -214,6 +215,7 @@ function App() {
         setExpenses(record.data.expenses)
         setTransfers(record.data.transfers)
         setRemoteStatus(`공유 정산 연결됨: ${record.id}`)
+        setSyncDebugStatus('initial-load')
       } catch {
         if (isCancelled) return
         setRemoteStatus('공유 정산을 불러오지 못했어요. URL을 확인해 주세요.')
@@ -230,7 +232,7 @@ function App() {
   useEffect(() => {
     if (!sharedSettlementId || !canUseRemoteStore()) return
 
-    const applyRemoteRecord = (record: { id: string; data: SettlementPayload }) => {
+    const applyRemoteRecord = (record: { id: string; data: SettlementPayload }, source: 'realtime' | 'polling') => {
       const nextJson = JSON.stringify(record.data)
       if (nextJson === lastRemoteJsonRef.current) return
       suppressNextRemoteSaveRef.current = true
@@ -239,14 +241,15 @@ function App() {
       setExpenses(record.data.expenses)
       setTransfers(record.data.transfers)
       setRemoteStatus(`다른 사람이 수정한 내용을 반영했어요: ${record.id}`)
+      setSyncDebugStatus(source)
     }
 
-    const unsubscribe = subscribeSettlement(sharedSettlementId, applyRemoteRecord)
+    const unsubscribe = subscribeSettlement(sharedSettlementId, (record) => applyRemoteRecord(record, 'realtime'))
 
     const interval = window.setInterval(async () => {
       try {
         const record = await getSettlement(sharedSettlementId)
-        applyRemoteRecord(record)
+        applyRemoteRecord(record, 'polling')
       } catch {
         // noop
       }
@@ -738,6 +741,7 @@ function App() {
           <button onClick={shareSettlement}>공유하기</button>
         </div>
         {(exportMessage || remoteStatus) && <p className="helper export-message compact-status">{remoteStatus}{exportMessage ? ` · ${exportMessage}` : ''}</p>}
+        {sharedSettlementId && <p className="helper debug-sync-status">sync-debug: {syncDebugStatus}</p>}
       </header>
 
       <main className="layout">
