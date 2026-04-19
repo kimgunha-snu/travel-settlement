@@ -619,7 +619,7 @@ function App() {
                     <th>이름</th>
                     <th>결제</th>
                     <th>분담</th>
-                    <th>송금 반영 후</th>
+                    <th>정산 차액</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -640,7 +640,7 @@ function App() {
                   <strong>{memberMap[row.memberId]?.name}</strong>
                   <div><span>결제</span><em>{currency.format(row.paid)}</em></div>
                   <div><span>분담</span><em>{currency.format(row.share)}</em></div>
-                  <div><span>송금 반영 후</span><em className={row.net >= 0 ? 'positive' : 'negative'}>{row.net >= 0 ? '+' : '-'}{currency.format(Math.abs(row.net))}</em></div>
+                  <div><span>정산 차액</span><em className={row.net >= 0 ? 'positive' : 'negative'}>{row.net >= 0 ? '+' : '-'}{currency.format(Math.abs(row.net))}</em></div>
                 </div>
               ))}
             </div>
