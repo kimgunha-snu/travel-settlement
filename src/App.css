@@ -273,6 +273,12 @@ td {
   white-space: nowrap;
 }
 
+.table-wrap th,
+.table-wrap td,
+.table-wrap table {
+  white-space: nowrap;
+}
+
 th {
   color: #475569;
   font-size: 0.95rem;
@@ -333,6 +339,13 @@ th {
 .history-main p {
   word-break: keep-all;
   overflow-wrap: anywhere;
+}
+
+.helper,
+.subtitle,
+.panel p {
+  overflow-wrap: anywhere;
+  word-break: keep-all;
 }
 
 .history-amount {
