@@ -39,6 +39,7 @@ type BalanceRow = {
 }
 
 type Settlement = {
+  id: string
   fromId: string
   toId: string
   amount: number
@@ -53,9 +54,35 @@ const currency = new Intl.NumberFormat('ko-KR', {
 })
 
 const storageKey = 'travel-settlement-app-data'
+const settlementDoneStorageKey = 'travel-settlement-app-settlement-done'
 const createId = () => Math.random().toString(36).slice(2, 10)
 
 const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [] })
+
+const evaluateAmountInput = (value: string) => {
+  const sanitized = value.replace(/,/g, '').trim()
+  if (!sanitized) return null
+  if (!/^[0-9+\-*/().\s]+$/.test(sanitized)) return null
+
+  try {
+    const result = Function(`"use strict"; return (${sanitized})`)()
+    if (typeof result !== 'number' || !Number.isFinite(result)) return null
+    return result
+  } catch {
+    return null
+  }
+}
+
+const readSettlementDoneMap = () => {
+  try {
+    const raw = window.localStorage.getItem(settlementDoneStorageKey)
+    if (!raw) return {} as Record<string, boolean>
+    const parsed = JSON.parse(raw) as Record<string, boolean>
+    return parsed ?? {}
+  } catch {
+    return {}
+  }
+}
 
 const readStoredData = (): ImportPayload => {
   if (shouldStartFreshFromUrl()) return emptyPayload()
@@ -118,6 +145,7 @@ function App() {
   const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
   const [expenseEditForm, setExpenseEditForm] = useState({ title: '', amount: '', payerId: '', participantIds: [] as string[] })
   const [transferEditForm, setTransferEditForm] = useState({ amount: '', fromId: '', toId: '' })
+  const [settlementDoneMap, setSettlementDoneMap] = useState<Record<string, boolean>>(() => readSettlementDoneMap())
   const lastRemoteJsonRef = useRef('')
   const suppressNextRemoteSaveRef = useRef(false)
 
@@ -133,6 +161,10 @@ function App() {
       window.history.replaceState({}, '', url.toString())
     }
   }, [currentPayloadJson])
+
+  useEffect(() => {
+    window.localStorage.setItem(settlementDoneStorageKey, JSON.stringify(settlementDoneMap))
+  }, [settlementDoneMap])
 
   useEffect(() => {
     const settlementId = getSettlementIdFromUrl()
@@ -254,7 +286,7 @@ function App() {
       const debtor = debtors[i]
       const creditor = creditors[j]
       const amount = Math.min(debtor.amount, creditor.amount)
-      result.push({ fromId: debtor.memberId, toId: creditor.memberId, amount })
+      result.push({ id: `${debtor.memberId}-${creditor.memberId}`, fromId: debtor.memberId, toId: creditor.memberId, amount })
       debtor.amount -= amount
       creditor.amount -= amount
       if (debtor.amount <= 0.5) i += 1
@@ -265,6 +297,9 @@ function App() {
   }, [balances])
 
   const allMembersSelected = members.length > 0 && expenseForm.participantIds.length === members.length
+
+  const completedSettlementCount = settlements.filter((item) => settlementDoneMap[item.id]).length
+  const remainingSettlementCount = settlements.length - completedSettlementCount
 
   const addMember = () => {
     const name = newMemberName.trim()
@@ -327,8 +362,8 @@ function App() {
   }
 
   const addExpense = () => {
-    const amount = Number(expenseForm.amount)
-    if (!expenseForm.title.trim() || !expenseForm.payerId || !Number.isFinite(amount) || amount <= 0) return
+    const amount = evaluateAmountInput(expenseForm.amount)
+    if (!expenseForm.title.trim() || !expenseForm.payerId || amount === null || amount <= 0) return
 
     setExpenses((current) => [
       ...current,
@@ -345,9 +380,9 @@ function App() {
   }
 
   const addTransfer = () => {
-    const amount = Number(transferForm.amount)
+    const amount = evaluateAmountInput(transferForm.amount)
     if (!transferForm.fromId || !transferForm.toId || transferForm.fromId === transferForm.toId) return
-    if (!Number.isFinite(amount) || amount <= 0) return
+    if (amount === null || amount <= 0) return
 
     setTransfers((current) => [
       ...current,
@@ -370,6 +405,27 @@ function App() {
     document.body.removeChild(anchor)
     URL.revokeObjectURL(url)
     setExportMessage('현재 정산 데이터를 JSON 파일로 다운로드했어요.')
+  }
+
+  const copySettlementSummary = async () => {
+    if (settlements.length === 0) {
+      setExportMessage('복사할 자동 정산 결과가 없어요.')
+      return
+    }
+
+    const summary = settlements
+      .map((item) => {
+        const doneLabel = settlementDoneMap[item.id] ? ' (완료)' : ''
+        return `${memberMap[item.fromId]?.name} → ${memberMap[item.toId]?.name} ${currency.format(item.amount)}${doneLabel}`
+      })
+      .join('\n')
+
+    try {
+      await navigator.clipboard.writeText(summary)
+      setExportMessage('자동 정산 결과를 복사했어요.')
+    } catch {
+      setExportMessage('복사에 실패했어요. 브라우저 권한을 확인해 주세요.')
+    }
   }
 
   const openNewSettlementWindow = () => {
@@ -446,8 +502,8 @@ function App() {
 
   const saveExpenseEdit = () => {
     if (!editingExpenseId) return
-    const amount = Number(expenseEditForm.amount)
-    if (!expenseEditForm.title.trim() || !expenseEditForm.payerId || !Number.isFinite(amount) || amount <= 0) return
+    const amount = evaluateAmountInput(expenseEditForm.amount)
+    if (!expenseEditForm.title.trim() || !expenseEditForm.payerId || amount === null || amount <= 0) return
 
     setExpenses((current) => current.map((expense) => expense.id !== editingExpenseId ? expense : {
       ...expense,
@@ -461,9 +517,9 @@ function App() {
 
   const saveTransferEdit = () => {
     if (!editingTransferId) return
-    const amount = Number(transferEditForm.amount)
+    const amount = evaluateAmountInput(transferEditForm.amount)
     if (!transferEditForm.fromId || !transferEditForm.toId || transferEditForm.fromId === transferEditForm.toId) return
-    if (!Number.isFinite(amount) || amount <= 0) return
+    if (amount === null || amount <= 0) return
 
     setTransfers((current) => current.map((transfer) => transfer.id !== editingTransferId ? transfer : {
       ...transfer,
@@ -480,6 +536,13 @@ function App() {
       participantIds: current.participantIds.includes(memberId)
         ? current.participantIds.filter((id) => id !== memberId)
         : [...current.participantIds, memberId],
+    }))
+  }
+
+  const toggleSettlementDone = (settlementId: string) => {
+    setSettlementDoneMap((current) => ({
+      ...current,
+      [settlementId]: !current[settlementId],
     }))
   }
 
@@ -536,7 +599,7 @@ function App() {
             <h2>지출 추가</h2>
             <div className="form-grid">
               <input value={expenseForm.title} onChange={(event) => setExpenseForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
-              <input value={expenseForm.amount} onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액" inputMode="numeric" />
+              <input value={expenseForm.amount} onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액 (예: 12000+8000)" inputMode="numeric" />
               <select value={expenseForm.payerId} onChange={(event) => setExpenseForm((current) => ({ ...current, payerId: event.target.value }))}>
                 <option value="">결제자 선택</option>
                 {members.map((member) => (
@@ -567,7 +630,7 @@ function App() {
           <div className="form-section">
             <h2>송금 기록</h2>
             <div className="form-grid">
-              <input value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액" inputMode="numeric" />
+              <input value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액 (예: 5000+2500)" inputMode="numeric" />
               <select value={transferForm.fromId} onChange={(event) => setTransferForm((current) => ({ ...current, fromId: event.target.value }))}>
                 <option value="">보내는 사람 선택</option>
                 {members.map((member) => (
@@ -586,19 +649,32 @@ function App() {
         </section>
 
         <section className="panel">
-          <h2>자동 정산 결과</h2>
+          <div className="section-header-with-actions">
+            <div>
+              <h2>자동 정산 결과</h2>
+              <p className="helper">남은 건 {remainingSettlementCount}건, 완료한 건 {completedSettlementCount}건이에요.</p>
+            </div>
+            <button onClick={copySettlementSummary}>정산 결과 복사</button>
+          </div>
           <div className="settlement-list">
             {settlements.length === 0 ? (
               <div className="empty">현재 추가 송금 없이도 거의 정산이 맞아떨어져요.</div>
             ) : (
-              settlements.map((settlement, index) => (
-                <div key={`${settlement.fromId}-${settlement.toId}-${index}`} className="settlement-item">
-                  <strong>{memberMap[settlement.fromId]?.name}</strong>
-                  <span>→</span>
-                  <strong>{memberMap[settlement.toId]?.name}</strong>
-                  <em>{currency.format(settlement.amount)}</em>
-                </div>
-              ))
+              settlements.map((settlement, index) => {
+                const isDone = Boolean(settlementDoneMap[settlement.id])
+                return (
+                  <div key={`${settlement.fromId}-${settlement.toId}-${index}`} className={`settlement-item ${isDone ? 'settlement-item-done' : ''}`}>
+                    <strong>{memberMap[settlement.fromId]?.name}</strong>
+                    <span>→</span>
+                    <strong>{memberMap[settlement.toId]?.name}</strong>
+                    <em>{currency.format(settlement.amount)}</em>
+                    <label className="settlement-done-toggle">
+                      <input type="checkbox" checked={isDone} onChange={() => toggleSettlementDone(settlement.id)} />
+                      완료
+                    </label>
+                  </div>
+                )
+              })
             )}
           </div>
         </section>
@@ -751,7 +827,7 @@ function App() {
             </div>
             <div className="form-grid">
               <input value={expenseEditForm.title} onChange={(event) => setExpenseEditForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
-              <input value={expenseEditForm.amount} onChange={(event) => setExpenseEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액" inputMode="numeric" />
+              <input value={expenseEditForm.amount} onChange={(event) => setExpenseEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액 (예: 12000+8000)" inputMode="numeric" />
               <select value={expenseEditForm.payerId} onChange={(event) => setExpenseEditForm((current) => ({ ...current, payerId: event.target.value }))}>
                 <option value="">결제자 선택</option>
                 {members.map((member) => (
@@ -780,7 +856,7 @@ function App() {
               <button className="ghost-button" onClick={() => setEditingTransferId(null)}>닫기</button>
             </div>
             <div className="form-grid">
-              <input value={transferEditForm.amount} onChange={(event) => setTransferEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액" inputMode="numeric" />
+              <input value={transferEditForm.amount} onChange={(event) => setTransferEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액 (예: 5000+2500)" inputMode="numeric" />
               <select value={transferEditForm.fromId} onChange={(event) => setTransferEditForm((current) => ({ ...current, fromId: event.target.value }))}>
                 <option value="">보내는 사람 선택</option>
                 {members.map((member) => (

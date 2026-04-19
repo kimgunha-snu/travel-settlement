@@ -22,6 +22,14 @@
   flex-wrap: wrap;
 }
 
+.section-header-with-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .utility-panel {
   margin-top: 8px;
 }
@@ -345,6 +353,24 @@ th {
   white-space: nowrap;
 }
 
+.settlement-item-done {
+  opacity: 0.6;
+  background: #f1f5f9;
+}
+
+.settlement-done-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: #475569;
+}
+
+.settlement-done-toggle input {
+  width: auto;
+  margin: 0;
+}
+
 .history-item p,
 .helper,
 .empty {
@@ -431,6 +457,10 @@ th {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   }
 
+  .section-header-with-actions {
+    align-items: start;
+  }
+
   .settlement-item strong:first-child {
     justify-self: start;
   }
@@ -441,6 +471,10 @@ th {
   }
 
   .settlement-item em {
+    grid-column: 1 / -1;
+  }
+
+  .settlement-done-toggle {
     grid-column: 1 / -1;
   }
 
