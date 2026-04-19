@@ -505,8 +505,9 @@ function App() {
       setShareUrl(url.toString())
       setIsShareModalOpen(true)
       setRemoteStatus(`공유 링크를 만들었어요: ${settlementId}`)
-    } catch {
-      setRemoteStatus('공유 링크 생성에 실패했어요. Supabase 설정을 확인해 주세요.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setRemoteStatus(`공유 링크 생성 실패: ${message}`)
     }
   }
 
