@@ -254,7 +254,16 @@ function App() {
         <section className="panel">
           <h2>참가자</h2>
           <div className="inline-form">
-            <input value={newMemberName} onChange={(event) => setNewMemberName(event.target.value)} placeholder="이름 추가" />
+            <input
+              value={newMemberName}
+              onChange={(event) => setNewMemberName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                addMember()
+              }}
+              placeholder="이름 추가"
+            />
             <button onClick={addMember}>추가</button>
           </div>
           <div className="chips">
