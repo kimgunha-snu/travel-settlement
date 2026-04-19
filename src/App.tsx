@@ -408,7 +408,7 @@ function App() {
     }
 
     const expense = {
-      id: createId(),
+      id: sharedSettlementId ? createUuid() : createId(),
       title: expenseForm.title.trim(),
       amount,
       payerId: expenseForm.payerId,
@@ -446,7 +446,7 @@ function App() {
       return
     }
 
-    const transfer = { id: createId(), amount, fromId: transferForm.fromId, toId: transferForm.toId }
+    const transfer = { id: sharedSettlementId ? createUuid() : createId(), amount, fromId: transferForm.fromId, toId: transferForm.toId }
 
     if (sharedSettlementId && canUseRemoteStore()) {
       try {
