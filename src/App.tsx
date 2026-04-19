@@ -797,9 +797,8 @@ function App() {
               <div className="empty">아직 참가자가 없어요.</div>
             ) : (
               members.map((member) => (
-                <span key={member.id} className="chip removable-chip">
+                <span key={member.id} className="chip">
                   {member.name}
-                  <button type="button" onClick={() => removeMember(member.id)}>삭제</button>
                 </span>
               ))
             )}
