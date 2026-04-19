@@ -316,13 +316,14 @@ function App() {
     const name = newMemberName.trim()
     if (!name) return
 
-    const member = { id: createId(), name }
+    const member = { id: sharedSettlementId ? createUuid() : createId(), name }
 
     if (sharedSettlementId && canUseRemoteStore()) {
       try {
         await addRemoteMember(sharedSettlementId, member)
-      } catch {
-        setRemoteStatus('참가자 추가에 실패했어요.')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
+        setRemoteStatus(`참가자 추가 실패: ${message}`)
         return
       }
     } else {
@@ -389,7 +390,18 @@ function App() {
 
   const addExpense = async () => {
     const amount = evaluateAmountInput(expenseForm.amount)
-    if (!expenseForm.title.trim() || !expenseForm.payerId || amount === null || amount <= 0) return
+    if (!expenseForm.title.trim()) {
+      setRemoteStatus('지출 항목명을 입력해 주세요.')
+      return
+    }
+    if (!expenseForm.payerId) {
+      setRemoteStatus('지출 결제자를 선택해 주세요.')
+      return
+    }
+    if (amount === null || amount <= 0) {
+      setRemoteStatus('지출 금액을 올바르게 입력해 주세요.')
+      return
+    }
 
     const expense = {
       id: createId(),
@@ -416,8 +428,18 @@ function App() {
 
   const addTransfer = async () => {
     const amount = evaluateAmountInput(transferForm.amount)
-    if (!transferForm.fromId || !transferForm.toId || transferForm.fromId === transferForm.toId) return
-    if (amount === null || amount <= 0) return
+    if (!transferForm.fromId || !transferForm.toId) {
+      setRemoteStatus('송금 보낸 사람과 받는 사람을 선택해 주세요.')
+      return
+    }
+    if (transferForm.fromId === transferForm.toId) {
+      setRemoteStatus('송금 보낸 사람과 받는 사람은 달라야 해요.')
+      return
+    }
+    if (amount === null || amount <= 0) {
+      setRemoteStatus('송금 금액을 올바르게 입력해 주세요.')
+      return
+    }
 
     const transfer = { id: createId(), amount, fromId: transferForm.fromId, toId: transferForm.toId }
 
