@@ -497,8 +497,6 @@ function App() {
         <div className="hero-actions">
           <button onClick={openNewSettlementWindow}>새 정산</button>
           <button onClick={shareSettlement}>공유하기</button>
-          <button onClick={() => setIsImportModalOpen(true)}>Import</button>
-          <button onClick={exportData}>Export</button>
         </div>
         {(exportMessage || remoteStatus) && <p className="helper export-message">{remoteStatus}{exportMessage ? ` · ${exportMessage}` : ''}</p>}
       </header>
@@ -680,6 +678,15 @@ function App() {
                 ))
               )}
             </div>
+          </div>
+        </section>
+
+        <section className="panel utility-panel">
+          <h2>가져오기 / 내보내기</h2>
+          <p className="helper">DB 공유 기능이 있어서 자주 쓰진 않지만, 백업이나 수동 복구가 필요할 때 사용할 수 있어요.</p>
+          <div className="hero-actions">
+            <button onClick={() => setIsImportModalOpen(true)}>Import</button>
+            <button onClick={exportData}>Export</button>
           </div>
         </section>
       </main>

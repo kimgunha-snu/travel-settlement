@@ -22,6 +22,10 @@
   flex-wrap: wrap;
 }
 
+.utility-panel {
+  margin-top: 8px;
+}
+
 .export-message {
   width: 100%;
 }
