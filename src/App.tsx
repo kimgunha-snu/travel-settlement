@@ -402,8 +402,9 @@ function App() {
     if (sharedSettlementId && canUseRemoteStore()) {
       try {
         await addRemoteExpense(sharedSettlementId, expense)
-      } catch {
-        setRemoteStatus('지출 추가에 실패했어요.')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
+        setRemoteStatus(`지출 추가 실패: ${message}`)
         return
       }
     } else {
@@ -423,8 +424,9 @@ function App() {
     if (sharedSettlementId && canUseRemoteStore()) {
       try {
         await addRemoteTransfer(sharedSettlementId, transfer)
-      } catch {
-        setRemoteStatus('송금 추가에 실패했어요.')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
+        setRemoteStatus(`송금 추가 실패: ${message}`)
         return
       }
     } else {
