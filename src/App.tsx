@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 type Member = {
@@ -81,21 +81,27 @@ function App() {
   const [importText, setImportText] = useState('')
   const [importMessage, setImportMessage] = useState('내보낸 데이터(JSON)를 붙여넣으면 지금 상태를 그대로 복구할 수 있어요.')
   const [exportMessage, setExportMessage] = useState('')
+  const [exportText, setExportText] = useState('')
+  const hasLoadedStorageRef = useRef(false)
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(storageKey)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as ImportPayload
-      setMembers(parsed.members ?? [])
-      setExpenses(parsed.expenses ?? [])
-      setTransfers(parsed.transfers ?? [])
+      if (raw) {
+        const parsed = JSON.parse(raw) as ImportPayload
+        setMembers(parsed.members ?? [])
+        setExpenses(parsed.expenses ?? [])
+        setTransfers(parsed.transfers ?? [])
+      }
     } catch {
       // ignore broken local data
+    } finally {
+      hasLoadedStorageRef.current = true
     }
   }, [])
 
   useEffect(() => {
+    if (!hasLoadedStorageRef.current) return
     window.localStorage.setItem(storageKey, JSON.stringify({ members, expenses, transfers }))
   }, [members, expenses, transfers])
 
@@ -250,8 +256,14 @@ function App() {
   const exportData = async () => {
     const payload: ImportPayload = { members, expenses, transfers }
     const text = JSON.stringify(payload, null, 2)
-    await navigator.clipboard.writeText(text)
-    setExportMessage('현재 정산 데이터를 JSON으로 클립보드에 복사했어요.')
+    setExportText(text)
+
+    try {
+      await navigator.clipboard.writeText(text)
+      setExportMessage('현재 정산 데이터를 JSON으로 클립보드에 복사했어요.')
+    } catch {
+      setExportMessage('클립보드 복사가 막혀서 아래 텍스트 상자에 export 내용을 보여줄게요. 직접 복사해 주세요.')
+    }
   }
 
   const importData = () => {
@@ -287,6 +299,7 @@ function App() {
           <button onClick={exportData}>Export</button>
         </div>
         {exportMessage && <p className="helper export-message">{exportMessage}</p>}
+        {exportText && <textarea className="export-box" value={exportText} readOnly rows={8} />}
       </header>
 
       <main className="layout">
