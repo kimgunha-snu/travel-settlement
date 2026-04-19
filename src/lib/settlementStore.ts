@@ -29,6 +29,7 @@ export type SettlementPayload = {
 export type SettlementRecord = {
   id: string
   title: string | null
+  share_token: string
   data: SettlementPayload
   created_at?: string
   updated_at?: string
@@ -79,13 +80,25 @@ const mapPayloadFromRows = (members: MemberRow[], expenses: ExpenseRow[], transf
   })),
 })
 
+const getSettlementBaseById = async (id: string) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { data, error } = await supabase
+    .from(settlementsTable)
+    .select('id, title, share_token, created_at, updated_at')
+    .eq('id', id)
+    .single()
+
+  if (error) throw error
+  return data as Omit<SettlementRecord, 'data'>
+}
+
 export const createSettlement = async (title = '공유 정산', payload?: SettlementPayload) => {
   if (!supabase) throw new Error('Supabase is not configured')
 
   const { data, error } = await supabase
     .from(settlementsTable)
     .insert({ title })
-    .select('id, title, created_at, updated_at')
+    .select('id, title, share_token, created_at, updated_at')
     .single()
 
   if (error) throw error
@@ -93,29 +106,45 @@ export const createSettlement = async (title = '공유 정산', payload?: Settle
   const recordBase = data as Omit<SettlementRecord, 'data'>
   if (payload) {
     await replaceSettlementContent(recordBase.id, payload)
-    return getSettlement(recordBase.id)
+    return getSettlementById(recordBase.id)
   }
 
   return { ...recordBase, data: { members: [], expenses: [], transfers: [] } }
 }
 
-export const getSettlement = async (id: string) => {
-  if (!supabase) throw new Error('Supabase is not configured')
+export const getSettlementById = async (id: string) => {
+  const settlement = await getSettlementBaseById(id)
+  return getSettlementData(settlement)
+}
 
-  const [{ data: settlement, error: settlementError }, { data: members, error: membersError }, { data: expenses, error: expensesError }, { data: transfers, error: transfersError }] = await Promise.all([
-    supabase.from(settlementsTable).select('id, title, created_at, updated_at').eq('id', id).single(),
+export const getSettlementByToken = async (shareToken: string) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { data, error } = await supabase
+    .from(settlementsTable)
+    .select('id, title, share_token, created_at, updated_at')
+    .eq('share_token', shareToken)
+    .single()
+
+  if (error) throw error
+  return getSettlementData(data as Omit<SettlementRecord, 'data'>)
+}
+
+const getSettlementData = async (settlement: Omit<SettlementRecord, 'data'>) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const id = settlement.id
+
+  const [{ data: members, error: membersError }, { data: expenses, error: expensesError }, { data: transfers, error: transfersError }] = await Promise.all([
     supabase.from(membersTable).select('id, settlement_id, name').eq('settlement_id', id).order('created_at', { ascending: true }),
     supabase.from(expensesTable).select('id, settlement_id, title, amount, payer_member_id, participant_member_ids').eq('settlement_id', id).order('created_at', { ascending: true }),
     supabase.from(transfersTable).select('id, settlement_id, amount, from_member_id, to_member_id').eq('settlement_id', id).order('created_at', { ascending: true }),
   ])
 
-  if (settlementError) throw settlementError
   if (membersError) throw membersError
   if (expensesError) throw expensesError
   if (transfersError) throw transfersError
 
   return {
-    ...(settlement as Omit<SettlementRecord, 'data'>),
+    ...settlement,
     data: mapPayloadFromRows(members as MemberRow[], expenses as ExpenseRow[], transfers as TransferRow[]),
   }
 }
@@ -248,7 +277,7 @@ export const subscribeSettlement = (
   const client = supabase
   const emit = async (source: string) => {
     onDebug?.(`realtime-event:${source}`)
-    onData(await getSettlement(id))
+    onData(await getSettlementById(id))
   }
 
   const channel = client
@@ -289,7 +318,7 @@ export const updateSettlement = async (id: string, payload: SettlementPayload, t
   }
 
   await replaceSettlementContent(id, payload)
-  return getSettlement(id)
+  return getSettlementById(id)
 }
 
 export const canUseRemoteStore = () => isSupabaseConfigured

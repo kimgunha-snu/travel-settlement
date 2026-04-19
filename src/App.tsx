@@ -9,7 +9,8 @@ import {
   deleteRemoteExpense,
   deleteRemoteMember,
   deleteRemoteTransfer,
-  getSettlement,
+  getSettlementById,
+  getSettlementByToken,
   subscribeSettlement,
   updateRemoteExpense,
   updateRemoteTransfer,
@@ -105,6 +106,7 @@ const readStoredData = (): ImportPayload => {
 
 const getUrl = () => new URL(window.location.href)
 const getSettlementIdFromUrl = () => getUrl().searchParams.get('settlement') ?? ''
+const getSettlementTokenFromUrl = () => getUrl().searchParams.get('token') ?? ''
 
 const shouldStartFreshFromUrl = () => getUrl().searchParams.get('fresh') === '1'
 
@@ -174,6 +176,7 @@ function App() {
   const [syncDebugStatus, setSyncDebugStatus] = useState('idle')
   const [socketDebugStatus, setSocketDebugStatus] = useState('ws-unknown')
   const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
+  const [sharedSettlementToken, setSharedSettlementToken] = useState(() => getSettlementTokenFromUrl())
   const [isShareModalOpen, setIsShareModalOpen] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
@@ -198,7 +201,8 @@ function App() {
 
   useEffect(() => {
     const settlementId = getSettlementIdFromUrl()
-    if (!settlementId) return
+    const settlementToken = getSettlementTokenFromUrl()
+    if (!settlementId || !settlementToken) return
     if (!canUseRemoteStore()) {
       setRemoteStatus('URL에 공유 정산 ID가 있지만 Supabase 환경변수가 없어요.')
       return
@@ -208,11 +212,12 @@ function App() {
 
     const load = async () => {
       try {
-        const record = await getSettlement(settlementId)
+        const record = await getSettlementByToken(settlementToken)
         if (isCancelled) return
         suppressNextRemoteSaveRef.current = true
         lastRemoteJsonRef.current = JSON.stringify(record.data)
         setSharedSettlementId(record.id)
+        setSharedSettlementToken(record.share_token)
         setMembers(record.data.members)
         setExpenses(record.data.expenses)
         setTransfers(record.data.transfers)
@@ -256,7 +261,7 @@ function App() {
     const interval = window.setInterval(async () => {
       setSocketDebugStatus(getRealtimeDebugInfo())
       try {
-        const record = await getSettlement(sharedSettlementId)
+        const record = await getSettlementById(sharedSettlementId)
         applyRemoteRecord(record, 'polling')
       } catch {
         // noop
@@ -578,6 +583,7 @@ function App() {
       if (!settlementId) {
         const record = await createSettlement('공유 정산')
         settlementId = record.id
+        setSharedSettlementToken(record.share_token)
         const { payload: normalizedPayload, memberIdMap } = normalizePayloadForRemote(currentPayload)
         setSharedSettlementId(settlementId)
         setMembers(normalizedPayload.members)
@@ -610,8 +616,18 @@ function App() {
 
       const url = new URL(window.location.href)
       url.searchParams.set('settlement', settlementId)
+      if (sharedSettlementToken) {
+        url.searchParams.set('token', sharedSettlementToken)
+      } else if (!sharedSettlementId) {
+        url.searchParams.set('token', getSettlementTokenFromUrl() || '')
+      }
       window.history.replaceState({}, '', url.toString())
       lastRemoteJsonRef.current = currentPayloadJson
+      if (!sharedSettlementId) {
+        const latestRecord = await getSettlementById(settlementId)
+        setSharedSettlementToken(latestRecord.share_token)
+        url.searchParams.set('token', latestRecord.share_token)
+      }
       setShareUrl(url.toString())
       setIsShareModalOpen(true)
       setRemoteStatus(`공유 링크를 만들었어요: ${settlementId}`)
