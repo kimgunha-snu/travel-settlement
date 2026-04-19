@@ -272,6 +272,10 @@ function App() {
   }
 
   const removeMember = (memberId: string) => {
+    const memberName = memberMap[memberId]?.name ?? '이 참가자'
+    const shouldDelete = window.confirm(`${memberName}를 삭제하면 관련 지출/송금 데이터도 함께 바뀔 수 있어요. 정말 삭제할까요?`)
+    if (!shouldDelete) return
+
     setMembers((current) => current.filter((member) => member.id !== memberId))
     setExpenses((current) =>
       current
