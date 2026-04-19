@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { canUseRemoteStore, createSettlement, getSettlement, updateSettlement, type SettlementPayload } from './lib/settlementStore'
 
 type Member = {
   id: string
@@ -36,11 +37,7 @@ type Settlement = {
   amount: number
 }
 
-type ImportPayload = {
-  members: Member[]
-  expenses: Expense[]
-  transfers: Transfer[]
-}
+type ImportPayload = SettlementPayload
 
 const currency = new Intl.NumberFormat('ko-KR', {
   style: 'currency',
@@ -97,10 +94,14 @@ function App() {
   const [importText, setImportText] = useState('')
   const [importMessage, setImportMessage] = useState('내보낸 데이터(JSON)를 붙여넣으면 지금 상태를 그대로 복구할 수 있어요.')
   const [exportMessage, setExportMessage] = useState('')
+  const [remoteStatus, setRemoteStatus] = useState(canUseRemoteStore() ? 'Supabase 연결 가능' : 'Supabase 환경변수 미설정')
+  const [sharedSettlementId, setSharedSettlementId] = useState('')
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify({ members, expenses, transfers }))
   }, [members, expenses, transfers])
+
+  const currentPayload: SettlementPayload = { members, expenses, transfers }
 
   const memberMap = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members])
 
@@ -265,6 +266,58 @@ function App() {
     setExportMessage('현재 정산 데이터를 JSON 파일로 다운로드했어요.')
   }
 
+  const createSharedSettlement = async () => {
+    if (!canUseRemoteStore()) {
+      setRemoteStatus('Supabase 환경변수가 없어서 공유 정산을 만들 수 없어요.')
+      return
+    }
+
+    try {
+      const record = await createSettlement('공유 정산')
+      setSharedSettlementId(record.id)
+      setRemoteStatus(`공유 정산 생성 완료: ${record.id}`)
+      window.history.replaceState({}, '', `?settlement=${record.id}`)
+      await updateSettlement(record.id, currentPayload)
+      setRemoteStatus(`공유 정산 생성 및 업로드 완료: ${record.id}`)
+    } catch {
+      setRemoteStatus('공유 정산 생성에 실패했어요. 테이블/환경변수를 확인해 주세요.')
+    }
+  }
+
+  const loadSharedSettlement = async () => {
+    if (!sharedSettlementId.trim()) return
+    if (!canUseRemoteStore()) {
+      setRemoteStatus('Supabase 환경변수가 없어서 공유 정산을 불러올 수 없어요.')
+      return
+    }
+
+    try {
+      const record = await getSettlement(sharedSettlementId.trim())
+      setMembers(record.data.members)
+      setExpenses(record.data.expenses)
+      setTransfers(record.data.transfers)
+      setRemoteStatus(`공유 정산을 불러왔어요: ${record.id}`)
+      window.history.replaceState({}, '', `?settlement=${record.id}`)
+    } catch {
+      setRemoteStatus('공유 정산을 불러오지 못했어요. ID를 다시 확인해 주세요.')
+    }
+  }
+
+  const saveSharedSettlement = async () => {
+    if (!sharedSettlementId.trim()) return
+    if (!canUseRemoteStore()) {
+      setRemoteStatus('Supabase 환경변수가 없어서 공유 정산을 저장할 수 없어요.')
+      return
+    }
+
+    try {
+      await updateSettlement(sharedSettlementId.trim(), currentPayload)
+      setRemoteStatus(`공유 정산 저장 완료: ${sharedSettlementId.trim()}`)
+    } catch {
+      setRemoteStatus('공유 정산 저장에 실패했어요.')
+    }
+  }
+
   const importData = () => {
     try {
       const parsed = JSON.parse(importText) as ImportPayload
@@ -301,6 +354,19 @@ function App() {
       </header>
 
       <main className="layout">
+        <section className="panel">
+          <h2>공유 정산 베타</h2>
+          <p className="helper">지금은 Supabase 연결 뼈대만 넣어둔 상태예요. env 설정 후 공유 ID 생성/불러오기를 테스트할 수 있어요.</p>
+          <div className="form-grid shared-grid">
+            <input value={sharedSettlementId} onChange={(event) => setSharedSettlementId(event.target.value)} placeholder="공유 정산 ID" />
+            <button onClick={createSharedSettlement}>공유 정산 만들기</button>
+            <button onClick={loadSharedSettlement}>불러오기</button>
+          </div>
+          <div className="import-actions">
+            <button onClick={saveSharedSettlement} disabled={!sharedSettlementId}>현재 내용 저장</button>
+            <span className="helper">{remoteStatus}</span>
+          </div>
+        </section>
         <section className="panel">
           <h2>참가자</h2>
           <div className="inline-form">
