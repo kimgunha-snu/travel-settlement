@@ -253,13 +253,22 @@ export const subscribeSettlement = (
 
   const channel = client
     .channel(`settlement-rows:${id}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: membersTable, filter: `settlement_id=eq.${id}` }, async () => {
+    .on('postgres_changes', { event: '*', schema: 'public', table: membersTable }, async (payload) => {
+      onDebug?.(`raw-event:members:${String((payload.new as { settlement_id?: string })?.settlement_id ?? (payload.old as { settlement_id?: string })?.settlement_id ?? 'unknown')}`)
+      const settlementId = String((payload.new as { settlement_id?: string })?.settlement_id ?? (payload.old as { settlement_id?: string })?.settlement_id ?? '')
+      if (settlementId !== id) return
       await emit('members')
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: expensesTable, filter: `settlement_id=eq.${id}` }, async () => {
+    .on('postgres_changes', { event: '*', schema: 'public', table: expensesTable }, async (payload) => {
+      onDebug?.(`raw-event:expenses:${String((payload.new as { settlement_id?: string })?.settlement_id ?? (payload.old as { settlement_id?: string })?.settlement_id ?? 'unknown')}`)
+      const settlementId = String((payload.new as { settlement_id?: string })?.settlement_id ?? (payload.old as { settlement_id?: string })?.settlement_id ?? '')
+      if (settlementId !== id) return
       await emit('expenses')
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: transfersTable, filter: `settlement_id=eq.${id}` }, async () => {
+    .on('postgres_changes', { event: '*', schema: 'public', table: transfersTable }, async (payload) => {
+      onDebug?.(`raw-event:transfers:${String((payload.new as { settlement_id?: string })?.settlement_id ?? (payload.old as { settlement_id?: string })?.settlement_id ?? 'unknown')}`)
+      const settlementId = String((payload.new as { settlement_id?: string })?.settlement_id ?? (payload.old as { settlement_id?: string })?.settlement_id ?? '')
+      if (settlementId !== id) return
       await emit('transfers')
     })
     .subscribe((status) => {
