@@ -359,6 +359,12 @@ function App() {
     setExportMessage('현재 정산 데이터를 JSON 파일로 다운로드했어요.')
   }
 
+  const openNewSettlementWindow = () => {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('settlement')
+    window.open(url.toString(), '_blank', 'noopener,noreferrer')
+  }
+
   const shareSettlement = async () => {
     if (!canUseRemoteStore()) {
       setRemoteStatus('Supabase 환경변수가 없어서 공유 링크를 만들 수 없어요.')
@@ -475,6 +481,7 @@ function App() {
           <p className="subtitle">여행 중 사용한 돈, 송금 내역, 같이 쓴 사람만 넣으면 자동으로 정산 결과를 계산해줘요.</p>
         </div>
         <div className="hero-actions">
+          <button onClick={openNewSettlementWindow}>새 정산</button>
           <button onClick={shareSettlement}>공유하기</button>
           <button onClick={() => setIsImportModalOpen(true)}>Import</button>
           <button onClick={exportData}>Export</button>
