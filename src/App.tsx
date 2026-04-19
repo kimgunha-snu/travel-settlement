@@ -230,7 +230,7 @@ function App() {
   useEffect(() => {
     if (!sharedSettlementId || !canUseRemoteStore()) return
 
-    const unsubscribe = subscribeSettlement(sharedSettlementId, (record) => {
+    const applyRemoteRecord = (record: { id: string; data: SettlementPayload }) => {
       const nextJson = JSON.stringify(record.data)
       if (nextJson === lastRemoteJsonRef.current) return
       suppressNextRemoteSaveRef.current = true
@@ -239,9 +239,23 @@ function App() {
       setExpenses(record.data.expenses)
       setTransfers(record.data.transfers)
       setRemoteStatus(`다른 사람이 수정한 내용을 반영했어요: ${record.id}`)
-    })
+    }
 
-    return unsubscribe
+    const unsubscribe = subscribeSettlement(sharedSettlementId, applyRemoteRecord)
+
+    const interval = window.setInterval(async () => {
+      try {
+        const record = await getSettlement(sharedSettlementId)
+        applyRemoteRecord(record)
+      } catch {
+        // noop
+      }
+    }, 2500)
+
+    return () => {
+      unsubscribe()
+      window.clearInterval(interval)
+    }
   }, [sharedSettlementId])
 
   useEffect(() => {
