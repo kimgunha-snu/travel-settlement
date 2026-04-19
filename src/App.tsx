@@ -63,6 +63,7 @@ const currency = new Intl.NumberFormat('ko-KR', {
 
 const storageKey = 'travel-settlement-app-data'
 const createId = () => Math.random().toString(36).slice(2, 10)
+const createUuid = () => crypto.randomUUID()
 
 const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [] })
 
@@ -112,6 +113,32 @@ const hasBatchim = (name: string) => {
 
 const withSubjectParticle = (name: string) => `${name}${hasBatchim(name) ? '이' : '가'}`
 const withObjectParticle = (name: string) => `${name}${hasBatchim(name) ? '을' : '를'}`
+
+const normalizePayloadForRemote = (payload: SettlementPayload): SettlementPayload => {
+  const memberIdMap = new Map<string, string>()
+
+  const members = payload.members.map((member) => {
+    const nextId = createUuid()
+    memberIdMap.set(member.id, nextId)
+    return { ...member, id: nextId }
+  })
+
+  const expenses = payload.expenses.map((expense) => ({
+    ...expense,
+    id: createUuid(),
+    payerId: memberIdMap.get(expense.payerId) ?? expense.payerId,
+    participantIds: expense.participantIds.map((id) => memberIdMap.get(id) ?? id),
+  }))
+
+  const transfers = payload.transfers.map((transfer) => ({
+    ...transfer,
+    id: createUuid(),
+    fromId: memberIdMap.get(transfer.fromId) ?? transfer.fromId,
+    toId: memberIdMap.get(transfer.toId) ?? transfer.toId,
+  }))
+
+  return { members, expenses, transfers }
+}
 
 function App() {
   const [members, setMembers] = useState<Member[]>(() => readStoredData().members)
@@ -492,8 +519,12 @@ function App() {
       if (!settlementId) {
         const record = await createSettlement('공유 정산')
         settlementId = record.id
+        const normalizedPayload = normalizePayloadForRemote(currentPayload)
         setSharedSettlementId(settlementId)
-        await updateSettlement(settlementId, currentPayload)
+        setMembers(normalizedPayload.members)
+        setExpenses(normalizedPayload.expenses)
+        setTransfers(normalizedPayload.transfers)
+        await updateSettlement(settlementId, normalizedPayload)
       } else {
         await updateSettlement(settlementId, currentPayload)
       }
