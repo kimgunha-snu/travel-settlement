@@ -74,10 +74,9 @@ const hasBatchim = (name: string) => {
 const withSubjectParticle = (name: string) => `${name}${hasBatchim(name) ? '이' : '가'}`
 
 function App() {
-  const stored = readStoredData()
-  const [members, setMembers] = useState<Member[]>(stored.members)
-  const [expenses, setExpenses] = useState<Expense[]>(stored.expenses)
-  const [transfers, setTransfers] = useState<Transfer[]>(stored.transfers)
+  const [members, setMembers] = useState<Member[]>(() => readStoredData().members)
+  const [expenses, setExpenses] = useState<Expense[]>(() => readStoredData().expenses)
+  const [transfers, setTransfers] = useState<Transfer[]>(() => readStoredData().transfers)
   const [newMemberName, setNewMemberName] = useState('')
   const [expenseForm, setExpenseForm] = useState({
     title: '',
