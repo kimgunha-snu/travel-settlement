@@ -256,10 +256,12 @@ textarea {
 
 .table-wrap {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
 }
 
@@ -268,6 +270,7 @@ td {
   text-align: left;
   padding: 12px 10px;
   border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
 }
 
 th {
