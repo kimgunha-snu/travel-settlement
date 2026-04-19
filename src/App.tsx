@@ -16,6 +16,7 @@ import {
   updateSettlement,
   type SettlementPayload,
 } from './lib/settlementStore'
+import { getRealtimeDebugInfo } from './lib/supabase'
 
 type Member = {
   id: string
@@ -171,6 +172,7 @@ function App() {
   const [summaryText, setSummaryText] = useState('')
   const [remoteStatus, setRemoteStatus] = useState(canUseRemoteStore() ? '공유 기능 사용 가능' : 'Supabase 환경변수 미설정')
   const [syncDebugStatus, setSyncDebugStatus] = useState('idle')
+  const [socketDebugStatus, setSocketDebugStatus] = useState('ws-unknown')
   const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
   const [isShareModalOpen, setIsShareModalOpen] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
@@ -232,6 +234,8 @@ function App() {
   useEffect(() => {
     if (!sharedSettlementId || !canUseRemoteStore()) return
 
+    setSocketDebugStatus(getRealtimeDebugInfo())
+
     const applyRemoteRecord = (record: { id: string; data: SettlementPayload }, source: 'realtime' | 'polling') => {
       const nextJson = JSON.stringify(record.data)
       if (nextJson === lastRemoteJsonRef.current) {
@@ -250,6 +254,7 @@ function App() {
     const unsubscribe = subscribeSettlement(sharedSettlementId, (record) => applyRemoteRecord(record, 'realtime'), setSyncDebugStatus)
 
     const interval = window.setInterval(async () => {
+      setSocketDebugStatus(getRealtimeDebugInfo())
       try {
         const record = await getSettlement(sharedSettlementId)
         applyRemoteRecord(record, 'polling')
@@ -745,6 +750,7 @@ function App() {
         </div>
         {(exportMessage || remoteStatus) && <p className="helper export-message compact-status">{remoteStatus}{exportMessage ? ` · ${exportMessage}` : ''}</p>}
         {sharedSettlementId && <p className="helper debug-sync-status">sync-debug: {syncDebugStatus}</p>}
+        {sharedSettlementId && <p className="helper debug-sync-status">socket-debug: {socketDebugStatus}</p>}
       </header>
 
       <main className="layout">
