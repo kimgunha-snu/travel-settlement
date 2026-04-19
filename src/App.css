@@ -337,6 +337,10 @@ th {
   color: #4338ca;
 }
 
+.settlement-item strong {
+  white-space: nowrap;
+}
+
 .history-item p,
 .helper,
 .empty {
@@ -417,6 +421,23 @@ th {
     border-radius: 14px;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
+  }
+
+  .settlement-item {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+
+  .settlement-item strong:first-child {
+    justify-self: start;
+  }
+
+  .settlement-item strong:last-of-type {
+    justify-self: end;
+    text-align: right;
+  }
+
+  .settlement-item em {
+    grid-column: 1 / -1;
   }
 
   .mobile-balance-card div {
