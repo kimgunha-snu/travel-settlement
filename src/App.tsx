@@ -498,16 +498,10 @@ function App() {
           <button onClick={openNewSettlementWindow}>새 정산</button>
           <button onClick={shareSettlement}>공유하기</button>
         </div>
-        {(exportMessage || remoteStatus) && <p className="helper export-message">{remoteStatus}{exportMessage ? ` · ${exportMessage}` : ''}</p>}
+        {(exportMessage || remoteStatus) && <p className="helper export-message compact-status">{remoteStatus}{exportMessage ? ` · ${exportMessage}` : ''}</p>}
       </header>
 
       <main className="layout">
-        <section className="panel">
-          <h2>공유 정산</h2>
-          <p className="helper">공유하기를 누르면 URL이 생성되고, 그 링크로 들어오면 같은 정산을 함께 수정할 수 있어요. 저장과 반영은 자동입니다.</p>
-          {sharedSettlementId && <p className="helper">현재 공유 정산 ID: {sharedSettlementId}</p>}
-        </section>
-
         <section className="panel">
           <h2>참가자</h2>
           <div className="inline-form">

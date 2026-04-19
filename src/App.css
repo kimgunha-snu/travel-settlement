@@ -30,6 +30,10 @@
   width: 100%;
 }
 
+.compact-status {
+  margin-top: 6px;
+}
+
 .export-box {
   width: 100%;
 }
