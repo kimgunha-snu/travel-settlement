@@ -36,12 +36,12 @@ export type SettlementRecord = {
 
 const table = 'settlements'
 
-export const createSettlement = async (title = '새 정산') => {
+export const createSettlement = async (title = '공유 정산', payload?: SettlementPayload) => {
   if (!supabase) throw new Error('Supabase is not configured')
 
   const { data, error } = await supabase
     .from(table)
-    .insert({ title, data: { members: [], expenses: [], transfers: [] } })
+    .insert({ title, data: payload ?? { members: [], expenses: [], transfers: [] } })
     .select('id, title, data, created_at, updated_at')
     .single()
 
@@ -77,6 +77,26 @@ export const updateSettlement = async (id: string, payload: SettlementPayload, t
 
   if (error) throw error
   return data as SettlementRecord
+}
+
+export const subscribeSettlement = (id: string, onData: (record: SettlementRecord) => void) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+
+  const client = supabase
+  const channel = client
+    .channel(`settlement:${id}`)
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table, filter: `id=eq.${id}` },
+      (payload) => {
+        onData(payload.new as SettlementRecord)
+      },
+    )
+    .subscribe()
+
+  return () => {
+    void client.removeChannel(channel)
+  }
 }
 
 export const canUseRemoteStore = () => isSupabaseConfigured

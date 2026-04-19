@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { canUseRemoteStore, createSettlement, getSettlement, updateSettlement, type SettlementPayload } from './lib/settlementStore'
+import {
+  canUseRemoteStore,
+  createSettlement,
+  getSettlement,
+  subscribeSettlement,
+  updateSettlement,
+  type SettlementPayload,
+} from './lib/settlementStore'
 
 type Member = {
   id: string
@@ -63,6 +70,8 @@ const readStoredData = (): ImportPayload => {
   }
 }
 
+const getSettlementIdFromUrl = () => new URL(window.location.href).searchParams.get('settlement') ?? ''
+
 const hasBatchim = (name: string) => {
   const last = name.trim().at(-1)
   if (!last) return false
@@ -93,14 +102,88 @@ function App() {
   const [importText, setImportText] = useState('')
   const [importMessage, setImportMessage] = useState('내보낸 데이터(JSON)를 붙여넣으면 지금 상태를 그대로 복구할 수 있어요.')
   const [exportMessage, setExportMessage] = useState('')
-  const [remoteStatus, setRemoteStatus] = useState(canUseRemoteStore() ? 'Supabase 연결 가능' : 'Supabase 환경변수 미설정')
-  const [sharedSettlementId, setSharedSettlementId] = useState('')
+  const [remoteStatus, setRemoteStatus] = useState(canUseRemoteStore() ? '공유 기능 사용 가능' : 'Supabase 환경변수 미설정')
+  const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
+  const lastRemoteJsonRef = useRef('')
+  const suppressNextRemoteSaveRef = useRef(false)
+
+  const currentPayload: SettlementPayload = useMemo(() => ({ members, expenses, transfers }), [members, expenses, transfers])
+  const currentPayloadJson = useMemo(() => JSON.stringify(currentPayload), [currentPayload])
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify({ members, expenses, transfers }))
-  }, [members, expenses, transfers])
+    window.localStorage.setItem(storageKey, currentPayloadJson)
+  }, [currentPayloadJson])
 
-  const currentPayload: SettlementPayload = { members, expenses, transfers }
+  useEffect(() => {
+    const settlementId = getSettlementIdFromUrl()
+    if (!settlementId) return
+    if (!canUseRemoteStore()) {
+      setRemoteStatus('URL에 공유 정산 ID가 있지만 Supabase 환경변수가 없어요.')
+      return
+    }
+
+    let isCancelled = false
+
+    const load = async () => {
+      try {
+        const record = await getSettlement(settlementId)
+        if (isCancelled) return
+        suppressNextRemoteSaveRef.current = true
+        lastRemoteJsonRef.current = JSON.stringify(record.data)
+        setSharedSettlementId(record.id)
+        setMembers(record.data.members)
+        setExpenses(record.data.expenses)
+        setTransfers(record.data.transfers)
+        setRemoteStatus(`공유 정산 연결됨: ${record.id}`)
+      } catch {
+        if (isCancelled) return
+        setRemoteStatus('공유 정산을 불러오지 못했어요. URL을 확인해 주세요.')
+      }
+    }
+
+    void load()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!sharedSettlementId || !canUseRemoteStore()) return
+
+    const unsubscribe = subscribeSettlement(sharedSettlementId, (record) => {
+      const nextJson = JSON.stringify(record.data)
+      if (nextJson === lastRemoteJsonRef.current) return
+      suppressNextRemoteSaveRef.current = true
+      lastRemoteJsonRef.current = nextJson
+      setMembers(record.data.members)
+      setExpenses(record.data.expenses)
+      setTransfers(record.data.transfers)
+      setRemoteStatus(`다른 사람이 수정한 내용을 반영했어요: ${record.id}`)
+    })
+
+    return unsubscribe
+  }, [sharedSettlementId])
+
+  useEffect(() => {
+    if (!sharedSettlementId || !canUseRemoteStore()) return
+    if (suppressNextRemoteSaveRef.current) {
+      suppressNextRemoteSaveRef.current = false
+      return
+    }
+
+    const timeout = window.setTimeout(async () => {
+      try {
+        await updateSettlement(sharedSettlementId, currentPayload)
+        lastRemoteJsonRef.current = currentPayloadJson
+        setRemoteStatus(`자동 저장됨: ${sharedSettlementId}`)
+      } catch {
+        setRemoteStatus('공유 정산 자동 저장에 실패했어요.')
+      }
+    }, 500)
+
+    return () => window.clearTimeout(timeout)
+  }, [sharedSettlementId, currentPayload, currentPayloadJson])
 
   const memberMap = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members])
 
@@ -265,55 +348,31 @@ function App() {
     setExportMessage('현재 정산 데이터를 JSON 파일로 다운로드했어요.')
   }
 
-  const createSharedSettlement = async () => {
+  const shareSettlement = async () => {
     if (!canUseRemoteStore()) {
-      setRemoteStatus('Supabase 환경변수가 없어서 공유 정산을 만들 수 없어요.')
+      setRemoteStatus('Supabase 환경변수가 없어서 공유 링크를 만들 수 없어요.')
       return
     }
 
     try {
-      const record = await createSettlement('공유 정산')
-      setSharedSettlementId(record.id)
-      setRemoteStatus(`공유 정산 생성 완료: ${record.id}`)
-      window.history.replaceState({}, '', `?settlement=${record.id}`)
-      await updateSettlement(record.id, currentPayload)
-      setRemoteStatus(`공유 정산 생성 및 업로드 완료: ${record.id}`)
+      let settlementId = sharedSettlementId
+
+      if (!settlementId) {
+        const record = await createSettlement('공유 정산', currentPayload)
+        settlementId = record.id
+        setSharedSettlementId(settlementId)
+      } else {
+        await updateSettlement(settlementId, currentPayload)
+      }
+
+      const url = new URL(window.location.href)
+      url.searchParams.set('settlement', settlementId)
+      window.history.replaceState({}, '', url.toString())
+      await navigator.clipboard.writeText(url.toString())
+      lastRemoteJsonRef.current = currentPayloadJson
+      setRemoteStatus(`공유 링크를 복사했어요: ${settlementId}`)
     } catch {
-      setRemoteStatus('공유 정산 생성에 실패했어요. 테이블/환경변수를 확인해 주세요.')
-    }
-  }
-
-  const loadSharedSettlement = async () => {
-    if (!sharedSettlementId.trim()) return
-    if (!canUseRemoteStore()) {
-      setRemoteStatus('Supabase 환경변수가 없어서 공유 정산을 불러올 수 없어요.')
-      return
-    }
-
-    try {
-      const record = await getSettlement(sharedSettlementId.trim())
-      setMembers(record.data.members)
-      setExpenses(record.data.expenses)
-      setTransfers(record.data.transfers)
-      setRemoteStatus(`공유 정산을 불러왔어요: ${record.id}`)
-      window.history.replaceState({}, '', `?settlement=${record.id}`)
-    } catch {
-      setRemoteStatus('공유 정산을 불러오지 못했어요. ID를 다시 확인해 주세요.')
-    }
-  }
-
-  const saveSharedSettlement = async () => {
-    if (!sharedSettlementId.trim()) return
-    if (!canUseRemoteStore()) {
-      setRemoteStatus('Supabase 환경변수가 없어서 공유 정산을 저장할 수 없어요.')
-      return
-    }
-
-    try {
-      await updateSettlement(sharedSettlementId.trim(), currentPayload)
-      setRemoteStatus(`공유 정산 저장 완료: ${sharedSettlementId.trim()}`)
-    } catch {
-      setRemoteStatus('공유 정산 저장에 실패했어요.')
+      setRemoteStatus('공유 링크 생성에 실패했어요. Supabase 설정과 브라우저 권한을 확인해 주세요.')
     }
   }
 
@@ -346,26 +405,20 @@ function App() {
           <p className="subtitle">여행 중 사용한 돈, 송금 내역, 같이 쓴 사람만 넣으면 자동으로 정산 결과를 계산해줘요.</p>
         </div>
         <div className="hero-actions">
+          <button onClick={shareSettlement}>공유하기</button>
           <button onClick={() => setIsImportModalOpen(true)}>Import</button>
           <button onClick={exportData}>Export</button>
         </div>
-        {exportMessage && <p className="helper export-message">{exportMessage}</p>}
+        {(exportMessage || remoteStatus) && <p className="helper export-message">{remoteStatus}{exportMessage ? ` · ${exportMessage}` : ''}</p>}
       </header>
 
       <main className="layout">
         <section className="panel">
-          <h2>공유 정산 베타</h2>
-          <p className="helper">지금은 Supabase 연결 뼈대만 넣어둔 상태예요. env 설정 후 공유 ID 생성/불러오기를 테스트할 수 있어요.</p>
-          <div className="form-grid shared-grid">
-            <input value={sharedSettlementId} onChange={(event) => setSharedSettlementId(event.target.value)} placeholder="공유 정산 ID" />
-            <button onClick={createSharedSettlement}>공유 정산 만들기</button>
-            <button onClick={loadSharedSettlement}>불러오기</button>
-          </div>
-          <div className="import-actions">
-            <button onClick={saveSharedSettlement} disabled={!sharedSettlementId}>현재 내용 저장</button>
-            <span className="helper">{remoteStatus}</span>
-          </div>
+          <h2>공유 정산</h2>
+          <p className="helper">공유하기를 누르면 URL이 생성되고, 그 링크로 들어오면 같은 정산을 함께 수정할 수 있어요. 저장과 반영은 자동입니다.</p>
+          {sharedSettlementId && <p className="helper">현재 공유 정산 ID: {sharedSettlementId}</p>}
         </section>
+
         <section className="panel">
           <h2>참가자</h2>
           <div className="inline-form">
