@@ -612,7 +612,7 @@ function App() {
         <section className="panel two-column">
           <div>
             <h2>정산표</h2>
-            <div className="table-wrap">
+            <div className="table-wrap desktop-only">
               <table>
                 <thead>
                   <tr>
@@ -634,13 +634,22 @@ function App() {
                 </tbody>
               </table>
             </div>
+            <div className="mobile-balance-list mobile-only">
+              {balances.map((row) => (
+                <div key={row.memberId} className="mobile-balance-card">
+                  <strong>{memberMap[row.memberId]?.name}</strong>
+                  <div><span>결제</span><em>{currency.format(row.paid)}</em></div>
+                  <div><span>분담</span><em>{currency.format(row.share)}</em></div>
+                  <div><span>송금 반영 후</span><em className={row.net >= 0 ? 'positive' : 'negative'}>{row.net >= 0 ? '+' : '-'}{currency.format(Math.abs(row.net))}</em></div>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div>
             <h2>입력된 내역</h2>
             <h3>지출</h3>
-            <div className="horizontal-scroll">
-              <div className="history-list">
+            <div className="history-list desktop-only">
               {expenses.length === 0 ? (
                 <div className="empty">아직 입력된 지출이 없어요.</div>
               ) : (
@@ -658,12 +667,28 @@ function App() {
                   </div>
                 ))
               )}
-              </div>
+            </div>
+            <div className="mobile-only mobile-history-list">
+              {expenses.length === 0 ? (
+                <div className="empty">아직 입력된 지출이 없어요.</div>
+              ) : (
+                expenses.map((expense) => (
+                  <div key={expense.id} className="mobile-history-card">
+                    <strong>{expense.title}</strong>
+                    <p>{withSubjectParticle(memberMap[expense.payerId]?.name ?? '')} 결제</p>
+                    <p>{expense.participantIds.map((id) => memberMap[id]?.name).join(', ')} 사용</p>
+                    <em className="history-amount">{currency.format(expense.amount)}</em>
+                    <div className="history-side">
+                      <button onClick={() => openExpenseEdit(expense)}>수정</button>
+                      <button onClick={() => removeExpense(expense.id)}>삭제</button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
 
             <h3>송금</h3>
-            <div className="horizontal-scroll">
-              <div className="history-list">
+            <div className="history-list desktop-only">
               {transfers.length === 0 ? (
                 <div className="empty">아직 기록된 송금이 없어요.</div>
               ) : (
@@ -680,7 +705,22 @@ function App() {
                   </div>
                 ))
               )}
-              </div>
+            </div>
+            <div className="mobile-only mobile-history-list">
+              {transfers.length === 0 ? (
+                <div className="empty">아직 기록된 송금이 없어요.</div>
+              ) : (
+                transfers.map((transfer) => (
+                  <div key={transfer.id} className="mobile-history-card">
+                    <strong>{memberMap[transfer.fromId]?.name} → {memberMap[transfer.toId]?.name}</strong>
+                    <em className="history-amount">{currency.format(transfer.amount)}</em>
+                    <div className="history-side">
+                      <button onClick={() => openTransferEdit(transfer)}>수정</button>
+                      <button onClick={() => removeTransfer(transfer.id)}>삭제</button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </section>
