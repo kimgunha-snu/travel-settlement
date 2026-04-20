@@ -324,7 +324,7 @@ function App() {
 
     return Array.from(rows.values()).map((row) => ({
       ...row,
-      net: row.paid - row.share - row.transferredOut + row.transferredIn,
+      net: row.paid - row.share + row.transferredOut - row.transferredIn,
     }))
   }, [expenses, members, transfers])
 
