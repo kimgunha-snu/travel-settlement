@@ -339,7 +339,8 @@ th {
   font-weight: 700;
 }
 
-.settlement-list {
+.settlement-list,
+.history-list {
   display: grid;
   gap: 10px;
 }
