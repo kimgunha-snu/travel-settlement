@@ -167,13 +167,24 @@ function App() {
     fromId: '',
     toId: '',
   })
+  const [isCollectDuesModalOpen, setIsCollectDuesModalOpen] = useState(false)
+  const [collectDuesForm, setCollectDuesForm] = useState({
+    amount: '',
+    receiverId: '',
+  })
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [importText, setImportText] = useState('')
   const [importMessage, setImportMessage] = useState('내보낸 데이터(JSON)를 붙여넣으면 지금 상태를 그대로 복구할 수 있어요.')
   const [exportMessage, setExportMessage] = useState('')
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false)
   const [summaryText, setSummaryText] = useState('')
-  const [remoteStatus, setRemoteStatus] = useState(canUseRemoteStore() ? '공유 기능 사용 가능' : 'Supabase 환경변수 미설정')
+  const [remoteStatus, setRemoteStatus] = useState(() => {
+    const settlementToken = getShareTokenFromUrl() || getSettlementTokenFromUrl()
+    if (settlementToken && !canUseRemoteStore()) {
+      return 'URL에 공유 정산 ID가 있지만 Supabase 환경변수가 없어요.'
+    }
+    return canUseRemoteStore() ? '공유 기능 사용 가능' : 'Supabase 환경변수 미설정'
+  })
   const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
   const [sharedSettlementToken, setSharedSettlementToken] = useState(() => getShareTokenFromUrl() || getSettlementTokenFromUrl())
   const [isShareModalOpen, setIsShareModalOpen] = useState(false)
@@ -188,6 +199,14 @@ function App() {
 
   const currentPayload: SettlementPayload = useMemo(() => ({ members, expenses, transfers }), [members, expenses, transfers])
   const currentPayloadJson = useMemo(() => JSON.stringify(currentPayload), [currentPayload])
+  const currentShareUrl = useMemo(() => {
+    if (!sharedSettlementId || !sharedSettlementToken) return shareUrl
+    const url = getUrl()
+    url.searchParams.delete('settlement')
+    url.searchParams.delete('token')
+    url.searchParams.set('share', sharedSettlementToken)
+    return url.toString()
+  }, [shareUrl, sharedSettlementId, sharedSettlementToken])
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, currentPayloadJson)
@@ -204,15 +223,13 @@ function App() {
     const settlementToken = getShareTokenFromUrl() || getSettlementTokenFromUrl()
     if (!settlementToken) return
     if (!canUseRemoteStore()) {
-      setRemoteStatus('URL에 공유 정산 ID가 있지만 Supabase 환경변수가 없어요.')
       return
     }
-
-    setRemoteStatus('공유 정산 연결 중...')
 
     let isCancelled = false
 
     const load = async () => {
+      setRemoteStatus('공유 정산 연결 중...')
       try {
         const record = await getSettlementByToken(settlementToken)
         if (isCancelled) return
@@ -280,15 +297,6 @@ function App() {
 
     lastRemoteJsonRef.current = currentPayloadJson
   }, [sharedSettlementId, currentPayloadJson])
-
-  useEffect(() => {
-    if (!sharedSettlementId || !sharedSettlementToken) return
-    const url = getUrl()
-    url.searchParams.delete('settlement')
-    url.searchParams.delete('token')
-    url.searchParams.set('share', sharedSettlementToken)
-    setShareUrl(url.toString())
-  }, [sharedSettlementId, sharedSettlementToken])
 
   const memberMap = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members])
 
@@ -511,6 +519,57 @@ function App() {
     }
 
     setTransferForm((current) => ({ ...current, amount: '' }))
+  }
+
+  const openCollectDuesModal = () => {
+    setCollectDuesForm((current) => ({
+      ...current,
+      receiverId: current.receiverId || transferForm.toId || members[0]?.id || '',
+    }))
+    setIsCollectDuesModalOpen(true)
+  }
+
+  const collectDues = async () => {
+    const amount = evaluateAmountInput(collectDuesForm.amount)
+    if (!collectDuesForm.receiverId) {
+      setRemoteStatus('회비를 받을 총무를 선택해 주세요.')
+      return
+    }
+    if (amount === null || amount <= 0) {
+      setRemoteStatus('회비 금액을 올바르게 입력해 주세요.')
+      return
+    }
+
+    const duesTransfers = members
+      .filter((member) => member.id !== collectDuesForm.receiverId)
+      .map((member) => ({
+        id: sharedSettlementId ? createUuid() : createId(),
+        amount,
+        fromId: member.id,
+        toId: collectDuesForm.receiverId,
+      }))
+
+    if (duesTransfers.length === 0) {
+      setRemoteStatus('회비를 보낼 참가자가 없어요.')
+      return
+    }
+
+    if (sharedSettlementId && canUseRemoteStore()) {
+      try {
+        await Promise.all(duesTransfers.map((transfer) => addRemoteTransfer(sharedSettlementId, transfer)))
+        setTransfers((current) => [...current, ...duesTransfers])
+      } catch (error) {
+        const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
+        setRemoteStatus(`회비 걷기 실패: ${message}`)
+        return
+      }
+    } else {
+      setTransfers((current) => [...current, ...duesTransfers])
+    }
+
+    setCollectDuesForm((current) => ({ ...current, amount: '' }))
+    setIsCollectDuesModalOpen(false)
+    setExportMessage(`${duesTransfers.length}명의 회비 송금 기록을 추가했어요.`)
   }
 
   const exportData = () => {
@@ -839,7 +898,10 @@ function App() {
           </div>
 
           <div className="form-section">
-            <h2>송금 기록</h2>
+            <div className="section-header-with-actions">
+              <h2>송금 기록</h2>
+              <button onClick={openCollectDuesModal}>회비 걷기</button>
+            </div>
             <div className="form-grid">
               <input value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액 (예: 5000+2500)" inputMode="text" />
               <select value={transferForm.fromId} onChange={(event) => setTransferForm((current) => ({ ...current, fromId: event.target.value }))}>
@@ -1071,7 +1133,42 @@ function App() {
               <button className="ghost-button" onClick={() => setIsShareModalOpen(false)}>닫기</button>
             </div>
             <p className="helper">아래 URL을 복사해서 보내면 같은 정산을 함께 수정할 수 있어요.</p>
-            <textarea value={shareUrl} readOnly rows={4} />
+            <textarea value={currentShareUrl} readOnly rows={4} />
+          </div>
+        </div>
+      )}
+
+      {isCollectDuesModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsCollectDuesModalOpen(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>회비 걷기</h2>
+              <button className="ghost-button" onClick={() => setIsCollectDuesModalOpen(false)}>닫기</button>
+            </div>
+            <p className="helper">총무를 제외한 모든 참가자가 같은 금액을 총무에게 보낸 것으로 송금 기록을 추가해요.</p>
+            <div className="form-grid">
+              <input
+                value={collectDuesForm.amount}
+                onChange={(event) => setCollectDuesForm((current) => ({ ...current, amount: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  event.preventDefault()
+                  void collectDues()
+                }}
+                placeholder="1인당 회비 (예: 30000)"
+                inputMode="text"
+              />
+              <select
+                value={collectDuesForm.receiverId}
+                onChange={(event) => setCollectDuesForm((current) => ({ ...current, receiverId: event.target.value }))}
+              >
+                <option value="">총무 선택</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>{withSubjectParticle(member.name)} 받음</option>
+                ))}
+              </select>
+            </div>
+            <button onClick={() => void collectDues()}>송금 기록 추가</button>
           </div>
         </div>
       )}
