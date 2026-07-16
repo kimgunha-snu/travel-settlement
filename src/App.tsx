@@ -16,6 +16,7 @@ import {
   updateRemoteMember,
   updateRemoteTransfer,
   updateSettlement,
+  type DuesCollection,
   type SettlementPayload,
 } from './lib/settlementStore'
 
@@ -71,7 +72,7 @@ const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
   return value.toString(16)
 })
 
-const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [] })
+const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [], duesCollections: [] })
 
 const evaluateAmountInput = (value: string) => {
   const sanitized = value.replace(/,/g, '').trim()
@@ -98,6 +99,7 @@ const readStoredData = (): ImportPayload => {
       members: Array.isArray(parsed.members) ? parsed.members : [],
       expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
       transfers: Array.isArray(parsed.transfers) ? parsed.transfers : [],
+      duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
     }
   } catch {
     return emptyPayload()
@@ -145,8 +147,15 @@ const normalizePayloadForRemote = (payload: SettlementPayload) => {
     toId: memberIdMap.get(transfer.toId) ?? transfer.toId,
   }))
 
+  const duesCollections = payload.duesCollections.map((duesCollection) => ({
+    ...duesCollection,
+    id: createUuid(),
+    receiverId: memberIdMap.get(duesCollection.receiverId) ?? duesCollection.receiverId,
+    paidMemberIds: duesCollection.paidMemberIds.map((id) => memberIdMap.get(id) ?? id),
+  }))
+
   return {
-    payload: { members, expenses, transfers },
+    payload: { members, expenses, transfers, duesCollections },
     memberIdMap,
   }
 }
@@ -155,6 +164,7 @@ function App() {
   const [members, setMembers] = useState<Member[]>(() => readStoredData().members)
   const [expenses, setExpenses] = useState<Expense[]>(() => readStoredData().expenses)
   const [transfers, setTransfers] = useState<Transfer[]>(() => readStoredData().transfers)
+  const [duesCollections, setDuesCollections] = useState<DuesCollection[]>(() => readStoredData().duesCollections)
   const [newMemberName, setNewMemberName] = useState('')
   const [expenseForm, setExpenseForm] = useState({
     title: '',
@@ -169,6 +179,7 @@ function App() {
   })
   const [isCollectDuesModalOpen, setIsCollectDuesModalOpen] = useState(false)
   const [collectDuesForm, setCollectDuesForm] = useState({
+    title: '',
     amount: '',
     receiverId: '',
   })
@@ -191,13 +202,15 @@ function App() {
   const [shareUrl, setShareUrl] = useState('')
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
   const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
+  const [editingDuesCollectionId, setEditingDuesCollectionId] = useState<string | null>(null)
   const [isMembersModalOpen, setIsMembersModalOpen] = useState(false)
   const [expenseEditForm, setExpenseEditForm] = useState({ title: '', amount: '', payerId: '', participantIds: [] as string[] })
   const [transferEditForm, setTransferEditForm] = useState({ amount: '', fromId: '', toId: '' })
+  const [duesEditForm, setDuesEditForm] = useState({ title: '', amount: '', receiverId: '', paidMemberIds: [] as string[] })
   const lastRemoteJsonRef = useRef('')
   const suppressNextRemoteSaveRef = useRef(false)
 
-  const currentPayload: SettlementPayload = useMemo(() => ({ members, expenses, transfers }), [members, expenses, transfers])
+  const currentPayload: SettlementPayload = useMemo(() => ({ members, expenses, transfers, duesCollections }), [duesCollections, expenses, members, transfers])
   const currentPayloadJson = useMemo(() => JSON.stringify(currentPayload), [currentPayload])
   const currentShareUrl = useMemo(() => {
     if (!sharedSettlementId || !sharedSettlementToken) return shareUrl
@@ -240,6 +253,7 @@ function App() {
         setMembers(record.data.members)
         setExpenses(record.data.expenses)
         setTransfers(record.data.transfers)
+        setDuesCollections(record.data.duesCollections)
         setRemoteStatus(`공유 정산 연결됨: ${record.id}`)
         setShareUrl(window.location.href)
       } catch {
@@ -268,6 +282,7 @@ function App() {
       setMembers(record.data.members)
       setExpenses(record.data.expenses)
       setTransfers(record.data.transfers)
+      setDuesCollections(record.data.duesCollections)
       setRemoteStatus(`다른 사람이 수정한 내용을 반영했어요: ${record.id}`)
     }
 
@@ -330,11 +345,22 @@ function App() {
       rows.get(transfer.toId)!.transferredIn += transfer.amount
     })
 
+    duesCollections.forEach((duesCollection) => {
+      duesCollection.paidMemberIds.forEach((memberId) => {
+        if (memberId === duesCollection.receiverId) return
+        const payer = rows.get(memberId)
+        const receiver = rows.get(duesCollection.receiverId)
+        if (!payer || !receiver) return
+        payer.transferredOut += duesCollection.amount
+        receiver.transferredIn += duesCollection.amount
+      })
+    })
+
     return Array.from(rows.values()).map((row) => ({
       ...row,
       net: row.paid - row.share + row.transferredOut - row.transferredIn,
     }))
-  }, [expenses, members, transfers])
+  }, [duesCollections, expenses, members, transfers])
 
   const settlements = useMemo<Settlement[]>(() => {
     const creditors = balances.filter((row) => row.net > 0.5).map((row) => ({ memberId: row.memberId, amount: row.net }))
@@ -420,6 +446,14 @@ function App() {
           .filter((expense) => expense.participantIds.length > 0),
       )
       setTransfers((current) => current.filter((transfer) => transfer.fromId !== memberId && transfer.toId !== memberId))
+      setDuesCollections((current) =>
+        current
+          .filter((duesCollection) => duesCollection.receiverId !== memberId)
+          .map((duesCollection) => ({
+            ...duesCollection,
+            paidMemberIds: duesCollection.paidMemberIds.filter((id) => id !== memberId),
+          })),
+      )
     }
     setExpenseForm((current) => ({
       ...current,
@@ -430,6 +464,10 @@ function App() {
       ...current,
       fromId: current.fromId === memberId ? '' : current.fromId,
       toId: current.toId === memberId ? '' : current.toId,
+    }))
+    setCollectDuesForm((current) => ({
+      ...current,
+      receiverId: current.receiverId === memberId ? '' : current.receiverId,
     }))
   }
 
@@ -524,13 +562,29 @@ function App() {
   const openCollectDuesModal = () => {
     setCollectDuesForm((current) => ({
       ...current,
+      title: current.title || `회비 ${duesCollections.length + 1}회차`,
       receiverId: current.receiverId || transferForm.toId || members[0]?.id || '',
     }))
     setIsCollectDuesModalOpen(true)
   }
 
-  const collectDues = async () => {
+  const syncDuesCollections = (nextDuesCollections: DuesCollection[], message?: string) => {
+    setDuesCollections(nextDuesCollections)
+    if (message) setExportMessage(message)
+
+    if (!sharedSettlementId || !canUseRemoteStore()) return
+
+    const nextPayload = { members, expenses, transfers, duesCollections: nextDuesCollections }
+    lastRemoteJsonRef.current = JSON.stringify(nextPayload)
+    void updateSettlement(sharedSettlementId, nextPayload).catch((error) => {
+      const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
+      setRemoteStatus(`회비 저장 실패: ${message}`)
+    })
+  }
+
+  const collectDues = () => {
     const amount = evaluateAmountInput(collectDuesForm.amount)
+    const title = collectDuesForm.title.trim() || `회비 ${duesCollections.length + 1}회차`
     if (!collectDuesForm.receiverId) {
       setRemoteStatus('회비를 받을 총무를 선택해 주세요.')
       return
@@ -540,40 +594,27 @@ function App() {
       return
     }
 
-    const duesTransfers = members
-      .filter((member) => member.id !== collectDuesForm.receiverId)
-      .map((member) => ({
-        id: sharedSettlementId ? createUuid() : createId(),
-        amount,
-        fromId: member.id,
-        toId: collectDuesForm.receiverId,
-      }))
-
-    if (duesTransfers.length === 0) {
+    const payerCount = members.filter((member) => member.id !== collectDuesForm.receiverId).length
+    if (payerCount === 0) {
       setRemoteStatus('회비를 보낼 참가자가 없어요.')
       return
     }
 
-    if (sharedSettlementId && canUseRemoteStore()) {
-      try {
-        await Promise.all(duesTransfers.map((transfer) => addRemoteTransfer(sharedSettlementId, transfer)))
-        setTransfers((current) => [...current, ...duesTransfers])
-      } catch (error) {
-        const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
-        setRemoteStatus(`회비 걷기 실패: ${message}`)
-        return
-      }
-    } else {
-      setTransfers((current) => [...current, ...duesTransfers])
+    const duesCollection: DuesCollection = {
+      id: sharedSettlementId ? createUuid() : createId(),
+      title,
+      amount,
+      receiverId: collectDuesForm.receiverId,
+      paidMemberIds: [],
     }
 
-    setCollectDuesForm((current) => ({ ...current, amount: '' }))
+    syncDuesCollections([...duesCollections, duesCollection], `${title} 회비 회차를 만들었어요.`)
+    setCollectDuesForm((current) => ({ ...current, title: '', amount: '' }))
     setIsCollectDuesModalOpen(false)
-    setExportMessage(`${duesTransfers.length}명의 회비 송금 기록을 추가했어요.`)
   }
 
   const exportData = () => {
-    const payload: ImportPayload = { members, expenses, transfers }
+    const payload: ImportPayload = { members, expenses, transfers, duesCollections }
     const text = JSON.stringify(payload, null, 2)
     const blob = new Blob([text], { type: 'application/json;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -615,9 +656,11 @@ function App() {
     setMembers([])
     setExpenses([])
     setTransfers([])
+    setDuesCollections([])
     setNewMemberName('')
     setExpenseForm({ title: '', amount: '', payerId: '', participantIds: [] })
     setTransferForm({ amount: '', fromId: '', toId: '' })
+    setCollectDuesForm({ title: '', amount: '', receiverId: '' })
     setExportMessage('현재 정산을 비웠어요.')
   }
 
@@ -667,6 +710,7 @@ function App() {
         setMembers(normalizedPayload.members)
         setExpenses(normalizedPayload.expenses)
         setTransfers(normalizedPayload.transfers)
+        setDuesCollections(normalizedPayload.duesCollections)
         setExpenseForm((current) => ({
           ...current,
           payerId: memberIdMap.get(current.payerId) ?? current.payerId,
@@ -686,6 +730,15 @@ function App() {
           ...current,
           fromId: memberIdMap.get(current.fromId) ?? current.fromId,
           toId: memberIdMap.get(current.toId) ?? current.toId,
+        }))
+        setCollectDuesForm((current) => ({
+          ...current,
+          receiverId: memberIdMap.get(current.receiverId) ?? current.receiverId,
+        }))
+        setDuesEditForm((current) => ({
+          ...current,
+          receiverId: memberIdMap.get(current.receiverId) ?? current.receiverId,
+          paidMemberIds: current.paidMemberIds.map((id) => memberIdMap.get(id) ?? id),
         }))
         await updateSettlement(settlementId, normalizedPayload)
       } else {
@@ -732,6 +785,7 @@ function App() {
       setMembers(parsed.members)
       setExpenses(parsed.expenses)
       setTransfers(parsed.transfers)
+      setDuesCollections(Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [])
       setImportMessage('가져오기에 성공했어요. 이전 상태를 그대로 복구했습니다.')
       setIsImportModalOpen(false)
       setImportText('')
@@ -756,6 +810,16 @@ function App() {
       amount: String(transfer.amount),
       fromId: transfer.fromId,
       toId: transfer.toId,
+    })
+  }
+
+  const openDuesCollectionEdit = (duesCollection: DuesCollection) => {
+    setEditingDuesCollectionId(duesCollection.id)
+    setDuesEditForm({
+      title: duesCollection.title,
+      amount: String(duesCollection.amount),
+      receiverId: duesCollection.receiverId,
+      paidMemberIds: [...duesCollection.paidMemberIds],
     })
   }
 
@@ -803,6 +867,28 @@ function App() {
     setEditingTransferId(null)
   }
 
+  const saveDuesCollectionEdit = () => {
+    if (!editingDuesCollectionId) return
+    const amount = evaluateAmountInput(duesEditForm.amount)
+    const title = duesEditForm.title.trim()
+    if (!title || !duesEditForm.receiverId || amount === null || amount <= 0) return
+
+    const nextDuesCollections = duesCollections.map((duesCollection) => {
+      if (duesCollection.id !== editingDuesCollectionId) return duesCollection
+
+      return {
+        ...duesCollection,
+        title,
+        amount,
+        receiverId: duesEditForm.receiverId,
+        paidMemberIds: duesEditForm.paidMemberIds.filter((id) => id !== duesEditForm.receiverId),
+      }
+    })
+
+    syncDuesCollections(nextDuesCollections, `${title} 회비 회차를 수정했어요.`)
+    setEditingDuesCollectionId(null)
+  }
+
   const toggleExpenseEditParticipant = (memberId: string) => {
     setExpenseEditForm((current) => ({
       ...current,
@@ -810,6 +896,39 @@ function App() {
         ? current.participantIds.filter((id) => id !== memberId)
         : [...current.participantIds, memberId],
     }))
+  }
+
+  const toggleDuesPayment = (duesCollectionId: string, memberId: string) => {
+    const nextDuesCollections = duesCollections.map((duesCollection) => {
+      if (duesCollection.id !== duesCollectionId) return duesCollection
+
+      return {
+        ...duesCollection,
+        paidMemberIds: duesCollection.paidMemberIds.includes(memberId)
+          ? duesCollection.paidMemberIds.filter((id) => id !== memberId)
+          : [...duesCollection.paidMemberIds, memberId],
+      }
+    })
+
+    syncDuesCollections(nextDuesCollections)
+  }
+
+  const toggleDuesEditPayment = (memberId: string) => {
+    setDuesEditForm((current) => ({
+      ...current,
+      paidMemberIds: current.paidMemberIds.includes(memberId)
+        ? current.paidMemberIds.filter((id) => id !== memberId)
+        : [...current.paidMemberIds, memberId],
+    }))
+  }
+
+  const removeDuesCollection = (id: string) => {
+    const duesCollection = duesCollections.find((item) => item.id === id)
+    const title = duesCollection?.title ?? '이 회비 회차'
+    const shouldDelete = window.confirm(`${title}를 삭제할까요? 납부 체크 내역도 함께 삭제돼요.`)
+    if (!shouldDelete) return
+
+    syncDuesCollections(duesCollections.filter((item) => item.id !== id), `${title}를 삭제했어요.`)
   }
 
   const removeExpense = (id: string) => {
@@ -918,6 +1037,58 @@ function App() {
               </select>
             </div>
             <button onClick={addTransfer}>송금 저장</button>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="section-header-with-actions">
+            <div>
+              <h2>회비 걷기</h2>
+              <p className="helper">회차별로 금액, 총무, 납부 여부를 관리해요. 납부 체크된 내역만 정산에 반영됩니다.</p>
+            </div>
+            <button onClick={openCollectDuesModal}>회비 회차 추가</button>
+          </div>
+          <div className="dues-list">
+            {duesCollections.length === 0 ? (
+              <div className="empty">아직 회비 회차가 없어요.</div>
+            ) : (
+              duesCollections.map((duesCollection) => {
+                const payerIds = members.map((member) => member.id).filter((id) => id !== duesCollection.receiverId)
+                const paidCount = duesCollection.paidMemberIds.filter((id) => payerIds.includes(id)).length
+
+                return (
+                  <div key={duesCollection.id} className="dues-card">
+                    <div className="dues-card-header">
+                      <div>
+                        <strong>{duesCollection.title}</strong>
+                        <p>{memberMap[duesCollection.receiverId]?.name ?? '총무 미선택'} 받음 · {currency.format(duesCollection.amount)} · {paidCount}/{payerIds.length}명 납부</p>
+                      </div>
+                      <div className="history-side">
+                        <button onClick={() => openDuesCollectionEdit(duesCollection)}>수정</button>
+                        <button onClick={() => removeDuesCollection(duesCollection.id)}>삭제</button>
+                      </div>
+                    </div>
+                    <div className="checkbox-list dues-checkbox-list">
+                      {members.length <= 1 ? (
+                        <div className="empty">납부 체크할 참가자가 없어요.</div>
+                      ) : (
+                        members.map((member) => (
+                          <label key={member.id} className={member.id === duesCollection.receiverId ? 'disabled-checkbox-label' : ''}>
+                            <input
+                              type="checkbox"
+                              checked={duesCollection.paidMemberIds.includes(member.id)}
+                              disabled={member.id === duesCollection.receiverId}
+                              onChange={() => toggleDuesPayment(duesCollection.id, member.id)}
+                            />
+                            {member.name}{member.id === duesCollection.receiverId ? ' (총무)' : ''}
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )
+              })
+            )}
           </div>
         </section>
 
@@ -1145,8 +1316,13 @@ function App() {
               <h2>회비 걷기</h2>
               <button className="ghost-button" onClick={() => setIsCollectDuesModalOpen(false)}>닫기</button>
             </div>
-            <p className="helper">총무를 제외한 모든 참가자가 같은 금액을 총무에게 보낸 것으로 송금 기록을 추가해요.</p>
+            <p className="helper">회차를 만든 뒤 참가자별 납부 여부를 체크하면 정산에 반영돼요.</p>
             <div className="form-grid">
+              <input
+                value={collectDuesForm.title}
+                onChange={(event) => setCollectDuesForm((current) => ({ ...current, title: event.target.value }))}
+                placeholder="회차명 (예: 1차 회비)"
+              />
               <input
                 value={collectDuesForm.amount}
                 onChange={(event) => setCollectDuesForm((current) => ({ ...current, amount: event.target.value }))}
@@ -1168,7 +1344,58 @@ function App() {
                 ))}
               </select>
             </div>
-            <button onClick={() => void collectDues()}>송금 기록 추가</button>
+            <button onClick={collectDues}>회비 회차 만들기</button>
+          </div>
+        </div>
+      )}
+
+      {editingDuesCollectionId && (
+        <div className="modal-backdrop" onClick={() => setEditingDuesCollectionId(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>회비 회차 수정</h2>
+              <button className="ghost-button" onClick={() => setEditingDuesCollectionId(null)}>닫기</button>
+            </div>
+            <div className="form-grid">
+              <input
+                value={duesEditForm.title}
+                onChange={(event) => setDuesEditForm((current) => ({ ...current, title: event.target.value }))}
+                placeholder="회차명"
+              />
+              <input
+                value={duesEditForm.amount}
+                onChange={(event) => setDuesEditForm((current) => ({ ...current, amount: event.target.value }))}
+                placeholder="1인당 회비"
+                inputMode="text"
+              />
+              <select
+                value={duesEditForm.receiverId}
+                onChange={(event) => setDuesEditForm((current) => ({
+                  ...current,
+                  receiverId: event.target.value,
+                  paidMemberIds: current.paidMemberIds.filter((id) => id !== event.target.value),
+                }))}
+              >
+                <option value="">총무 선택</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>{withSubjectParticle(member.name)} 받음</option>
+                ))}
+              </select>
+            </div>
+            <div className="checkbox-list">
+              {members.map((member) => (
+                <label key={member.id} className={member.id === duesEditForm.receiverId ? 'disabled-checkbox-label' : ''}>
+                  <input
+                    type="checkbox"
+                    checked={duesEditForm.paidMemberIds.includes(member.id)}
+                    disabled={member.id === duesEditForm.receiverId}
+                    onChange={() => toggleDuesEditPayment(member.id)}
+                  />
+                  {member.name}{member.id === duesEditForm.receiverId ? ' (총무)' : ''}
+                </label>
+              ))}
+            </div>
+            <button onClick={saveDuesCollectionEdit}>수정 저장</button>
           </div>
         </div>
       )}

@@ -20,10 +20,19 @@ export type Transfer = {
   toId: string
 }
 
+export type DuesCollection = {
+  id: string
+  title: string
+  amount: number
+  receiverId: string
+  paidMemberIds: string[]
+}
+
 export type SettlementPayload = {
   members: Member[]
   expenses: Expense[]
   transfers: Transfer[]
+  duesCollections: DuesCollection[]
 }
 
 export type SettlementRecord = {
@@ -62,8 +71,45 @@ const settlementsTable = 'settlements'
 const membersTable = 'settlement_members'
 const expensesTable = 'settlement_expenses'
 const transfersTable = 'settlement_transfers'
+const settlementTitleMetaPrefix = '__travel_settlement_meta_v1__:'
 
-const mapPayloadFromRows = (members: MemberRow[], expenses: ExpenseRow[], transfers: TransferRow[]): SettlementPayload => ({
+const emptyPayload = (): SettlementPayload => ({ members: [], expenses: [], transfers: [], duesCollections: [] })
+
+const parseTitleMetadata = (title: string | null) => {
+  if (!title?.startsWith(settlementTitleMetaPrefix)) {
+    return { title, duesCollections: [] as DuesCollection[] }
+  }
+
+  try {
+    const parsed = JSON.parse(title.slice(settlementTitleMetaPrefix.length)) as {
+      title?: string | null
+      duesCollections?: DuesCollection[]
+    }
+
+    return {
+      title: parsed.title ?? '공유 정산',
+      duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
+    }
+  } catch {
+    return { title: '공유 정산', duesCollections: [] as DuesCollection[] }
+  }
+}
+
+const encodeTitleMetadata = (title: string | null | undefined, payload: SettlementPayload) => {
+  if (payload.duesCollections.length === 0) return title ?? '공유 정산'
+
+  return `${settlementTitleMetaPrefix}${JSON.stringify({
+    title: title ?? '공유 정산',
+    duesCollections: payload.duesCollections,
+  })}`
+}
+
+const mapPayloadFromRows = (
+  members: MemberRow[],
+  expenses: ExpenseRow[],
+  transfers: TransferRow[],
+  duesCollections: DuesCollection[],
+): SettlementPayload => ({
   members: members.map((member) => ({ id: member.id, name: member.name })),
   expenses: expenses.map((expense) => ({
     id: expense.id,
@@ -78,6 +124,7 @@ const mapPayloadFromRows = (members: MemberRow[], expenses: ExpenseRow[], transf
     fromId: transfer.from_member_id,
     toId: transfer.to_member_id,
   })),
+  duesCollections,
 })
 
 const getSettlementBaseById = async (id: string) => {
@@ -105,11 +152,10 @@ export const createSettlement = async (title = '공유 정산', payload?: Settle
 
   const recordBase = data as Omit<SettlementRecord, 'data'>
   if (payload) {
-    await replaceSettlementContent(recordBase.id, payload)
-    return getSettlementById(recordBase.id)
+    return updateSettlement(recordBase.id, payload)
   }
 
-  return { ...recordBase, data: { members: [], expenses: [], transfers: [] } }
+  return { ...recordBase, data: emptyPayload() }
 }
 
 export const getSettlementById = async (id: string) => {
@@ -132,6 +178,7 @@ export const getSettlementByToken = async (shareToken: string) => {
 const getSettlementData = async (settlement: Omit<SettlementRecord, 'data'>) => {
   if (!supabase) throw new Error('Supabase is not configured')
   const id = settlement.id
+  const titleMetadata = parseTitleMetadata(settlement.title)
 
   const [{ data: members, error: membersError }, { data: expenses, error: expensesError }, { data: transfers, error: transfersError }] = await Promise.all([
     supabase.from(membersTable).select('id, settlement_id, name').eq('settlement_id', id).order('created_at', { ascending: true }),
@@ -145,7 +192,13 @@ const getSettlementData = async (settlement: Omit<SettlementRecord, 'data'>) => 
 
   return {
     ...settlement,
-    data: mapPayloadFromRows(members as MemberRow[], expenses as ExpenseRow[], transfers as TransferRow[]),
+    title: titleMetadata.title,
+    data: mapPayloadFromRows(
+      members as MemberRow[],
+      expenses as ExpenseRow[],
+      transfers as TransferRow[],
+      titleMetadata.duesCollections,
+    ),
   }
 }
 
@@ -312,10 +365,12 @@ export const subscribeSettlement = (
 export const updateSettlement = async (id: string, payload: SettlementPayload, title?: string) => {
   if (!supabase) throw new Error('Supabase is not configured')
 
-  if (title !== undefined) {
-    const { error } = await supabase.from(settlementsTable).update({ title }).eq('id', id)
-    if (error) throw error
-  }
+  const current = await getSettlementBaseById(id)
+  const currentTitle = parseTitleMetadata(current.title).title
+  const encodedTitle = encodeTitleMetadata(title ?? currentTitle, payload)
+
+  const { error } = await supabase.from(settlementsTable).update({ title: encodedTitle }).eq('id', id)
+  if (error) throw error
 
   await replaceSettlementContent(id, payload)
   return getSettlementById(id)
