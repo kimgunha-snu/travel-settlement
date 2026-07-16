@@ -181,7 +181,8 @@ button:hover {
 .participant-box,
 .chips,
 .history-list,
-.settlement-list {
+.settlement-list,
+.dues-list {
   margin-top: 14px;
 }
 

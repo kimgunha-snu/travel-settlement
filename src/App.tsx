@@ -1017,10 +1017,7 @@ function App() {
           </div>
 
           <div className="form-section">
-            <div className="section-header-with-actions">
-              <h2>송금 기록</h2>
-              <button onClick={openCollectDuesModal}>회비 걷기</button>
-            </div>
+            <h2>송금 기록</h2>
             <div className="form-grid">
               <input value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} placeholder="송금 금액 (예: 5000+2500)" inputMode="text" />
               <select value={transferForm.fromId} onChange={(event) => setTransferForm((current) => ({ ...current, fromId: event.target.value }))}>
