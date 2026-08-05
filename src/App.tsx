@@ -153,6 +153,15 @@ const createShareUrl = (shareToken: string) => {
   return url.toString()
 }
 
+const createFreshSettlementUrl = () => {
+  const url = getUrl()
+  url.searchParams.delete('settlement')
+  url.searchParams.delete('token')
+  url.searchParams.delete('share')
+  url.searchParams.set('fresh', '1')
+  return url.toString()
+}
+
 const getSavedSettlementTitle = (payload: SettlementPayload, fallback = '공유 정산') => {
   const names = payload.members.map((member) => member.name.trim()).filter(Boolean)
   if (names.length === 0) return fallback
@@ -737,10 +746,7 @@ function App() {
   }
 
   const duplicateCurrentSettlement = () => {
-    const url = getUrl()
-    url.searchParams.delete('settlement')
-    url.searchParams.set('fresh', '1')
-    const nextWindow = window.open(url.toString(), '_blank', 'noopener,noreferrer')
+    const nextWindow = window.open(createFreshSettlementUrl(), '_blank', 'noopener,noreferrer')
     if (!nextWindow) {
       setExportMessage('새 창을 열지 못했어요. 팝업 차단을 확인해 주세요.')
       return
@@ -758,10 +764,10 @@ function App() {
   }
 
   const openNewSettlementWindow = () => {
-    const url = getUrl()
-    url.searchParams.delete('settlement')
-    url.searchParams.set('fresh', '1')
-    window.open(url.toString(), '_blank', 'noopener,noreferrer')
+    const nextWindow = window.open(createFreshSettlementUrl(), '_blank', 'noopener,noreferrer')
+    if (!nextWindow) {
+      setExportMessage('새 창을 열지 못했어요. 팝업 차단을 확인해 주세요.')
+    }
   }
 
   const shareSettlement = async () => {
