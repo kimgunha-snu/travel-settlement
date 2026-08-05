@@ -182,7 +182,8 @@ button:hover {
 .chips,
 .history-list,
 .settlement-list,
-.dues-list {
+.dues-list,
+.saved-settlement-list {
   margin-top: 14px;
 }
 
@@ -342,14 +343,16 @@ th {
 
 .settlement-list,
 .history-list,
-.dues-list {
+.dues-list,
+.saved-settlement-list {
   display: grid;
   gap: 10px;
 }
 
 .settlement-item,
 .history-item,
-.dues-card {
+.dues-card,
+.saved-settlement-item {
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -359,7 +362,8 @@ th {
 }
 
 .settlement-item,
-.history-item {
+.history-item,
+.saved-settlement-item {
   grid-template-columns: minmax(220px, 1fr) auto auto;
   align-items: center;
 }
@@ -480,6 +484,10 @@ th {
 
   .settlement-item {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+
+  .saved-settlement-item {
+    grid-template-columns: 1fr;
   }
 
   .section-header-with-actions {

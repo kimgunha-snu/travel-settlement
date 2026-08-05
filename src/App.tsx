@@ -56,6 +56,14 @@ type Settlement = {
   amount: number
 }
 
+type SavedSettlementLink = {
+  id: string
+  token: string
+  title: string
+  url: string
+  savedAt: string
+}
+
 type ImportPayload = SettlementPayload
 
 const currency = new Intl.NumberFormat('ko-KR', {
@@ -65,6 +73,7 @@ const currency = new Intl.NumberFormat('ko-KR', {
 })
 
 const storageKey = 'travel-settlement-app-data'
+const savedLinksStorageKey = 'travel-settlement-app-saved-links'
 const createId = () => Math.random().toString(36).slice(2, 10)
 const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
   const random = Math.random() * 16 | 0
@@ -73,6 +82,13 @@ const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
 })
 
 const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [], duesCollections: [] })
+
+const savedDateFormatter = new Intl.DateTimeFormat('ko-KR', {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+})
 
 const evaluateAmountInput = (value: string) => {
   const sanitized = value.replace(/,/g, '').trim()
@@ -106,12 +122,43 @@ const readStoredData = (): ImportPayload => {
   }
 }
 
+const readSavedSettlementLinks = (): SavedSettlementLink[] => {
+  try {
+    const raw = window.localStorage.getItem(savedLinksStorageKey)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Partial<SavedSettlementLink>[]
+    if (!Array.isArray(parsed)) return []
+
+    return parsed
+      .filter((item): item is SavedSettlementLink => Boolean(item.id && item.token && item.url && item.title && item.savedAt))
+      .slice(0, 20)
+  } catch {
+    return []
+  }
+}
+
 const getUrl = () => new URL(window.location.href)
 const getSettlementIdFromUrl = () => getUrl().searchParams.get('settlement') ?? ''
 const getSettlementTokenFromUrl = () => getUrl().searchParams.get('token') ?? ''
 const getShareTokenFromUrl = () => getUrl().searchParams.get('share') ?? ''
 
 const shouldStartFreshFromUrl = () => getUrl().searchParams.get('fresh') === '1'
+
+const createShareUrl = (shareToken: string) => {
+  const url = getUrl()
+  url.searchParams.delete('settlement')
+  url.searchParams.delete('token')
+  url.searchParams.delete('fresh')
+  url.searchParams.set('share', shareToken)
+  return url.toString()
+}
+
+const getSavedSettlementTitle = (payload: SettlementPayload, fallback = '공유 정산') => {
+  const names = payload.members.map((member) => member.name.trim()).filter(Boolean)
+  if (names.length === 0) return fallback
+  if (names.length === 1) return `${names[0]} 정산`
+  return `${names[0]} 외 ${names.length - 1}명 정산`
+}
 
 const hasBatchim = (name: string) => {
   const last = name.trim().at(-1)
@@ -198,6 +245,7 @@ function App() {
   })
   const [sharedSettlementId, setSharedSettlementId] = useState(() => getSettlementIdFromUrl())
   const [sharedSettlementToken, setSharedSettlementToken] = useState(() => getShareTokenFromUrl() || getSettlementTokenFromUrl())
+  const [savedSettlementLinks, setSavedSettlementLinks] = useState<SavedSettlementLink[]>(() => readSavedSettlementLinks())
   const [isShareModalOpen, setIsShareModalOpen] = useState(false)
   const [shareUrl, setShareUrl] = useState('')
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
@@ -214,12 +262,29 @@ function App() {
   const currentPayloadJson = useMemo(() => JSON.stringify(currentPayload), [currentPayload])
   const currentShareUrl = useMemo(() => {
     if (!sharedSettlementId || !sharedSettlementToken) return shareUrl
-    const url = getUrl()
-    url.searchParams.delete('settlement')
-    url.searchParams.delete('token')
-    url.searchParams.set('share', sharedSettlementToken)
-    return url.toString()
+    return createShareUrl(sharedSettlementToken)
   }, [shareUrl, sharedSettlementId, sharedSettlementToken])
+
+  const saveSettlementLink = (link: Omit<SavedSettlementLink, 'savedAt'>) => {
+    setSavedSettlementLinks((current) => {
+      const nextLink = { ...link, savedAt: new Date().toISOString() }
+      const next = [nextLink, ...current.filter((item) => item.token !== link.token && item.id !== link.id)].slice(0, 20)
+      window.localStorage.setItem(savedLinksStorageKey, JSON.stringify(next))
+      return next
+    })
+  }
+
+  const removeSavedSettlementLink = (token: string) => {
+    setSavedSettlementLinks((current) => {
+      const next = current.filter((item) => item.token !== token)
+      window.localStorage.setItem(savedLinksStorageKey, JSON.stringify(next))
+      return next
+    })
+  }
+
+  const openSavedSettlementLink = (url: string) => {
+    window.location.assign(url)
+  }
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, currentPayloadJson)
@@ -255,7 +320,14 @@ function App() {
         setTransfers(record.data.transfers)
         setDuesCollections(record.data.duesCollections)
         setRemoteStatus(`공유 정산 연결됨: ${record.id}`)
-        setShareUrl(window.location.href)
+        const nextShareUrl = createShareUrl(record.share_token)
+        setShareUrl(nextShareUrl)
+        saveSettlementLink({
+          id: record.id,
+          token: record.share_token,
+          title: getSavedSettlementTitle(record.data, record.title ?? '공유 정산'),
+          url: nextShareUrl,
+        })
       } catch {
         if (isCancelled) return
         setRemoteStatus('공유 정산을 불러오지 못했어요. URL을 확인해 주세요.')
@@ -700,12 +772,14 @@ function App() {
 
     try {
       let settlementId = sharedSettlementId
+      let savedPayload = currentPayload
 
       if (!settlementId) {
         const record = await createSettlement('공유 정산')
         settlementId = record.id
         setSharedSettlementToken(record.share_token)
         const { payload: normalizedPayload, memberIdMap } = normalizePayloadForRemote(currentPayload)
+        savedPayload = normalizedPayload
         setSharedSettlementId(settlementId)
         setMembers(normalizedPayload.members)
         setExpenses(normalizedPayload.expenses)
@@ -756,10 +830,17 @@ function App() {
 
       url.searchParams.delete('settlement')
       url.searchParams.delete('token')
+      url.searchParams.delete('fresh')
       url.searchParams.set('share', token)
       window.history.replaceState({}, '', url.toString())
       lastRemoteJsonRef.current = currentPayloadJson
       setShareUrl(url.toString())
+      saveSettlementLink({
+        id: settlementId,
+        token,
+        title: getSavedSettlementTitle(savedPayload),
+        url: url.toString(),
+      })
       setIsShareModalOpen(true)
       setRemoteStatus(`공유 링크를 만들었어요: ${settlementId}`)
     } catch (error) {
@@ -965,6 +1046,33 @@ function App() {
       </header>
 
       <main className="layout">
+        <section className="panel saved-settlements-panel">
+          <div className="section-header-with-actions">
+            <div>
+              <h2>저장된 정산</h2>
+              <p className="helper">공유 링크를 만들거나 공유 링크로 접속하면 이 브라우저에 자동으로 저장돼요.</p>
+            </div>
+          </div>
+          <div className="saved-settlement-list">
+            {savedSettlementLinks.length === 0 ? (
+              <div className="empty">아직 저장된 공유 정산이 없어요.</div>
+            ) : (
+              savedSettlementLinks.map((savedLink) => (
+                <div key={savedLink.token} className="saved-settlement-item">
+                  <div className="history-main">
+                    <strong>{savedLink.title}</strong>
+                    <p>{savedDateFormatter.format(new Date(savedLink.savedAt))} 저장 · {savedLink.id}</p>
+                  </div>
+                  <div className="history-side">
+                    <button onClick={() => openSavedSettlementLink(savedLink.url)}>열기</button>
+                    <button onClick={() => removeSavedSettlementLink(savedLink.token)}>삭제</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
         <section className="panel">
           <div className="section-header-with-actions">
             <h2>참가자</h2>
