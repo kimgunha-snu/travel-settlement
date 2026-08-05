@@ -1046,33 +1046,6 @@ function App() {
       </header>
 
       <main className="layout">
-        <section className="panel saved-settlements-panel">
-          <div className="section-header-with-actions">
-            <div>
-              <h2>저장된 정산</h2>
-              <p className="helper">공유 링크를 만들거나 공유 링크로 접속하면 이 브라우저에 자동으로 저장돼요.</p>
-            </div>
-          </div>
-          <div className="saved-settlement-list">
-            {savedSettlementLinks.length === 0 ? (
-              <div className="empty">아직 저장된 공유 정산이 없어요.</div>
-            ) : (
-              savedSettlementLinks.map((savedLink) => (
-                <div key={savedLink.token} className="saved-settlement-item">
-                  <div className="history-main">
-                    <strong>{savedLink.title}</strong>
-                    <p>{savedDateFormatter.format(new Date(savedLink.savedAt))} 저장 · {savedLink.id}</p>
-                  </div>
-                  <div className="history-side">
-                    <button onClick={() => openSavedSettlementLink(savedLink.url)}>열기</button>
-                    <button onClick={() => removeSavedSettlementLink(savedLink.token)}>삭제</button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-
         <section className="panel">
           <div className="section-header-with-actions">
             <h2>참가자</h2>
@@ -1333,6 +1306,33 @@ function App() {
                 ))
               )}
             </div>
+          </div>
+        </section>
+
+        <section className="panel saved-settlements-panel">
+          <div className="section-header-with-actions">
+            <div>
+              <h2>저장된 정산</h2>
+              <p className="helper">공유 링크를 만들거나 공유 링크로 접속하면 이 브라우저에 자동으로 저장돼요.</p>
+            </div>
+          </div>
+          <div className="saved-settlement-list">
+            {savedSettlementLinks.length === 0 ? (
+              <div className="empty">아직 저장된 공유 정산이 없어요.</div>
+            ) : (
+              savedSettlementLinks.map((savedLink) => (
+                <div key={savedLink.token} className="saved-settlement-item">
+                  <div className="history-main">
+                    <strong>{savedLink.title}</strong>
+                    <p>{savedDateFormatter.format(new Date(savedLink.savedAt))} 저장 · {savedLink.id}</p>
+                  </div>
+                  <div className="history-side">
+                    <button onClick={() => openSavedSettlementLink(savedLink.url)}>열기</button>
+                    <button onClick={() => removeSavedSettlementLink(savedLink.token)}>삭제</button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </section>
 
