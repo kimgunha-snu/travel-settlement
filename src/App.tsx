@@ -701,7 +701,7 @@ function App() {
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `travel-settlement-export-${new Date().toISOString().slice(0, 10)}.json`
+    anchor.download = `trip-expense-split-export-${new Date().toISOString().slice(0, 10)}.json`
     document.body.appendChild(anchor)
     anchor.click()
     document.body.removeChild(anchor)
