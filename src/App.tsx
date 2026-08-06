@@ -73,6 +73,7 @@ const currency = new Intl.NumberFormat('ko-KR', {
 })
 
 const storageKey = 'travel-settlement-app-data'
+const cloneStorageKeyPrefix = 'travel-settlement-app-clone-'
 const savedLinksStorageKey = 'travel-settlement-app-saved-links'
 const createId = () => Math.random().toString(36).slice(2, 10)
 const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
@@ -105,6 +106,24 @@ const evaluateAmountInput = (value: string) => {
 }
 
 const readStoredData = (): ImportPayload => {
+  const cloneId = getCloneIdFromUrl()
+  if (cloneId) {
+    try {
+      const raw = window.localStorage.getItem(`${cloneStorageKeyPrefix}${cloneId}`)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<ImportPayload>
+        return {
+          members: Array.isArray(parsed.members) ? parsed.members : [],
+          expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
+          transfers: Array.isArray(parsed.transfers) ? parsed.transfers : [],
+          duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
+        }
+      }
+    } catch {
+      return emptyPayload()
+    }
+  }
+
   if (shouldStartFreshFromUrl()) return emptyPayload()
 
   try {
@@ -141,6 +160,7 @@ const getUrl = () => new URL(window.location.href)
 const getSettlementIdFromUrl = () => getUrl().searchParams.get('settlement') ?? ''
 const getSettlementTokenFromUrl = () => getUrl().searchParams.get('token') ?? ''
 const getShareTokenFromUrl = () => getUrl().searchParams.get('share') ?? ''
+const getCloneIdFromUrl = () => getUrl().searchParams.get('clone') ?? ''
 
 const shouldStartFreshFromUrl = () => getUrl().searchParams.get('fresh') === '1'
 
@@ -153,11 +173,13 @@ const createShareUrl = (shareToken: string) => {
   return url.toString()
 }
 
-const createFreshSettlementUrl = () => {
+const createFreshSettlementUrl = (cloneId?: string) => {
   const url = getUrl()
   url.searchParams.delete('settlement')
   url.searchParams.delete('token')
   url.searchParams.delete('share')
+  url.searchParams.delete('clone')
+  if (cloneId) url.searchParams.set('clone', cloneId)
   url.searchParams.set('fresh', '1')
   return url.toString()
 }
@@ -299,8 +321,16 @@ function App() {
     window.localStorage.setItem(storageKey, currentPayloadJson)
 
     const url = getUrl()
-    if (url.searchParams.get('fresh') === '1') {
+    const cloneId = url.searchParams.get('clone')
+    const shouldClearFresh = url.searchParams.get('fresh') === '1'
+    if (cloneId) {
+      window.localStorage.removeItem(`${cloneStorageKeyPrefix}${cloneId}`)
+      url.searchParams.delete('clone')
+    }
+    if (shouldClearFresh) {
       url.searchParams.delete('fresh')
+    }
+    if (cloneId || shouldClearFresh) {
       window.history.replaceState({}, '', url.toString())
     }
   }, [currentPayloadJson])
@@ -746,25 +776,21 @@ function App() {
   }
 
   const duplicateCurrentSettlement = () => {
-    const nextWindow = window.open(createFreshSettlementUrl(), '_blank', 'noopener,noreferrer')
+    const cloneId = createId()
+    window.localStorage.setItem(`${cloneStorageKeyPrefix}${cloneId}`, JSON.stringify(currentPayload))
+
+    const nextWindow = window.open(createFreshSettlementUrl(cloneId), '_blank')
     if (!nextWindow) {
+      window.localStorage.removeItem(`${cloneStorageKeyPrefix}${cloneId}`)
       setExportMessage('새 창을 열지 못했어요. 팝업 차단을 확인해 주세요.')
       return
     }
 
-    const clonedPayload = JSON.stringify(currentPayload)
-    nextWindow.addEventListener('load', () => {
-      try {
-        nextWindow.localStorage.setItem(storageKey, clonedPayload)
-      } catch {
-        // noop
-      }
-    })
     setExportMessage('현재 정산을 새 창으로 복제했어요.')
   }
 
   const openNewSettlementWindow = () => {
-    const nextWindow = window.open(createFreshSettlementUrl(), '_blank', 'noopener,noreferrer')
+    const nextWindow = window.open(createFreshSettlementUrl(), '_blank')
     if (!nextWindow) {
       setExportMessage('새 창을 열지 못했어요. 팝업 차단을 확인해 주세요.')
     }
