@@ -1041,7 +1041,7 @@ function App() {
       <header className="hero">
         <div>
           <p className="eyebrow">여행 정산 앱</p>
-          <h1>누가 얼마를 내고, 받아야 하는지 한 번에 정리</h1>
+          <h1>여행 경비 정산, 깔끔하게 끝내기</h1>
           <p className="subtitle">여행 중 사용한 돈, 송금 내역, 같이 쓴 사람만 넣으면 자동으로 정산 결과를 계산해줘요.</p>
         </div>
         <div className="hero-actions">
