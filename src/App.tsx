@@ -12,6 +12,7 @@ import {
   getSettlementById,
   getSettlementByToken,
   subscribeSettlement,
+  updateRemoteDuesCollections,
   updateRemoteExpense,
   updateRemoteMember,
   updateRemoteTransfer,
@@ -84,6 +85,79 @@ const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
 
 const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [], duesCollections: [] })
 
+const hasSameIds = (first: string[], second: string[]) => first.length === second.length && first.every((id, index) => id === second[index])
+
+const sanitizePayload = (payload: ImportPayload) => {
+  const memberIds = new Set(payload.members.map((member) => member.id))
+  let changed = false
+
+  const expenses = payload.expenses.flatMap((expense) => {
+    if (!memberIds.has(expense.payerId)) {
+      changed = true
+      return []
+    }
+
+    const participantIds = expense.participantIds.filter((id) => memberIds.has(id))
+    if (expense.participantIds.length > 0 && participantIds.length === 0) {
+      changed = true
+      return []
+    }
+    if (!hasSameIds(expense.participantIds, participantIds)) changed = true
+    return [{ ...expense, participantIds }]
+  })
+
+  const transfers = payload.transfers.filter((transfer) => {
+    const isValid = memberIds.has(transfer.fromId) && memberIds.has(transfer.toId)
+    if (!isValid) changed = true
+    return isValid
+  })
+
+  const duesCollections = payload.duesCollections.flatMap((duesCollection) => {
+    if (!memberIds.has(duesCollection.receiverId)) {
+      changed = true
+      return []
+    }
+
+    const paidMemberIds = duesCollection.paidMemberIds.filter((id) => id !== duesCollection.receiverId && memberIds.has(id))
+    if (!hasSameIds(duesCollection.paidMemberIds, paidMemberIds)) changed = true
+    return [{ ...duesCollection, paidMemberIds }]
+  })
+
+  return {
+    payload: { members: payload.members, expenses, transfers, duesCollections },
+    changed,
+  }
+}
+
+const repairRemoteReferences = async (
+  settlementId: string,
+  current: SettlementPayload,
+  cleaned: SettlementPayload,
+) => {
+  const cleanedExpenses = new Map(cleaned.expenses.map((expense) => [expense.id, expense]))
+  const cleanedTransfers = new Set(cleaned.transfers.map((transfer) => transfer.id))
+  const repairs: Promise<void>[] = []
+
+  current.expenses.forEach((expense) => {
+    const cleanedExpense = cleanedExpenses.get(expense.id)
+    if (!cleanedExpense) {
+      repairs.push(deleteRemoteExpense(expense.id))
+    } else if (JSON.stringify(expense) !== JSON.stringify(cleanedExpense)) {
+      repairs.push(updateRemoteExpense(cleanedExpense))
+    }
+  })
+
+  current.transfers.forEach((transfer) => {
+    if (!cleanedTransfers.has(transfer.id)) repairs.push(deleteRemoteTransfer(transfer.id))
+  })
+
+  if (JSON.stringify(current.duesCollections) !== JSON.stringify(cleaned.duesCollections)) {
+    repairs.push(updateRemoteDuesCollections(settlementId, cleaned.duesCollections))
+  }
+
+  await Promise.all(repairs)
+}
+
 const savedDateFormatter = new Intl.DateTimeFormat('ko-KR', {
   month: 'short',
   day: 'numeric',
@@ -112,12 +186,12 @@ const readStoredData = (): ImportPayload => {
       const raw = window.localStorage.getItem(`${cloneStorageKeyPrefix}${cloneId}`)
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<ImportPayload>
-        return {
+        return sanitizePayload({
           members: Array.isArray(parsed.members) ? parsed.members : [],
           expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
           transfers: Array.isArray(parsed.transfers) ? parsed.transfers : [],
           duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
-        }
+        }).payload
       }
     } catch {
       return emptyPayload()
@@ -130,12 +204,12 @@ const readStoredData = (): ImportPayload => {
     const raw = window.localStorage.getItem(storageKey)
     if (!raw) return emptyPayload()
     const parsed = JSON.parse(raw) as Partial<ImportPayload>
-    return {
+    return sanitizePayload({
       members: Array.isArray(parsed.members) ? parsed.members : [],
       expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
       transfers: Array.isArray(parsed.transfers) ? parsed.transfers : [],
       duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
-    }
+    }).payload
   } catch {
     return emptyPayload()
   }
@@ -350,23 +424,29 @@ function App() {
       try {
         const record = await getSettlementByToken(settlementToken)
         if (isCancelled) return
+        const cleaned = sanitizePayload(record.data)
         suppressNextRemoteSaveRef.current = true
-        lastRemoteJsonRef.current = JSON.stringify(record.data)
+        lastRemoteJsonRef.current = JSON.stringify(cleaned.payload)
         setSharedSettlementId(record.id)
         setSharedSettlementToken(record.share_token)
-        setMembers(record.data.members)
-        setExpenses(record.data.expenses)
-        setTransfers(record.data.transfers)
-        setDuesCollections(record.data.duesCollections)
-        setRemoteStatus(`공유 정산 연결됨: ${record.id}`)
+        setMembers(cleaned.payload.members)
+        setExpenses(cleaned.payload.expenses)
+        setTransfers(cleaned.payload.transfers)
+        setDuesCollections(cleaned.payload.duesCollections)
+        setRemoteStatus(cleaned.changed ? '삭제된 참가자의 연결 데이터를 정리하고 있어요.' : `공유 정산 연결됨: ${record.id}`)
         const nextShareUrl = createShareUrl(record.share_token)
         setShareUrl(nextShareUrl)
         saveSettlementLink({
           id: record.id,
           token: record.share_token,
-          title: getSavedSettlementTitle(record.data, record.title ?? '공유 정산'),
+          title: getSavedSettlementTitle(cleaned.payload, record.title ?? '공유 정산'),
           url: nextShareUrl,
         })
+        if (cleaned.changed) {
+          void repairRemoteReferences(record.id, record.data, cleaned.payload)
+            .then(() => setRemoteStatus('삭제된 참가자가 남긴 지출·송금·회비 참조를 정리했어요.'))
+            .catch(() => setRemoteStatus('삭제된 참가자 참조를 정리하지 못했어요. 다시 시도해 주세요.'))
+        }
       } catch {
         if (isCancelled) return
         setRemoteStatus('공유 정산을 불러오지 못했어요. URL을 확인해 주세요.')
@@ -384,17 +464,23 @@ function App() {
     if (!sharedSettlementId || !canUseRemoteStore()) return
 
     const applyRemoteRecord = (record: { id: string; data: SettlementPayload }) => {
-      const nextJson = JSON.stringify(record.data)
+      const cleaned = sanitizePayload(record.data)
+      const nextJson = JSON.stringify(cleaned.payload)
       if (nextJson === lastRemoteJsonRef.current) {
         return
       }
       suppressNextRemoteSaveRef.current = true
       lastRemoteJsonRef.current = nextJson
-      setMembers(record.data.members)
-      setExpenses(record.data.expenses)
-      setTransfers(record.data.transfers)
-      setDuesCollections(record.data.duesCollections)
-      setRemoteStatus(`다른 사람이 수정한 내용을 반영했어요: ${record.id}`)
+      setMembers(cleaned.payload.members)
+      setExpenses(cleaned.payload.expenses)
+      setTransfers(cleaned.payload.transfers)
+      setDuesCollections(cleaned.payload.duesCollections)
+      setRemoteStatus(cleaned.changed ? '삭제된 참가자의 연결 데이터를 정리하고 있어요.' : `다른 사람이 수정한 내용을 반영했어요: ${record.id}`)
+      if (cleaned.changed) {
+        void repairRemoteReferences(record.id, record.data, cleaned.payload)
+          .then(() => setRemoteStatus('삭제된 참가자가 남긴 지출·송금·회비 참조를 정리했어요.'))
+          .catch(() => setRemoteStatus('삭제된 참가자 참조를 정리하지 못했어요. 다시 시도해 주세요.'))
+      }
     }
 
     const unsubscribe = subscribeSettlement(sharedSettlementId, applyRemoteRecord)
@@ -441,9 +527,14 @@ function App() {
 
     expenses.forEach((expense) => {
       const payer = rows.get(expense.payerId)
-      if (payer) payer.paid += expense.amount
+      if (!payer) return
 
-      const participants = expense.participantIds.length > 0 ? expense.participantIds : [expense.payerId]
+      const participants = expense.participantIds.length > 0
+        ? expense.participantIds.filter((participantId) => rows.has(participantId))
+        : [expense.payerId]
+      if (participants.length === 0) return
+
+      payer.paid += expense.amount
       const perHead = expense.amount / participants.length
       participants.forEach((participantId) => {
         const participant = rows.get(participantId)
@@ -452,8 +543,11 @@ function App() {
     })
 
     transfers.forEach((transfer) => {
-      rows.get(transfer.fromId)!.transferredOut += transfer.amount
-      rows.get(transfer.toId)!.transferredIn += transfer.amount
+      const sender = rows.get(transfer.fromId)
+      const receiver = rows.get(transfer.toId)
+      if (!sender || !receiver) return
+      sender.transferredOut += transfer.amount
+      receiver.transferredIn += transfer.amount
     })
 
     duesCollections.forEach((duesCollection) => {
@@ -546,25 +640,34 @@ function App() {
     const shouldDelete = window.confirm(`${withObjectParticle(memberName)} 삭제하면 관련 지출/송금 데이터도 함께 바뀔 수 있어요. 정말 삭제할까요?`)
     if (!shouldDelete) return
 
+    const nextPayload = sanitizePayload({
+      members: members.filter((member) => member.id !== memberId),
+      expenses,
+      transfers,
+      duesCollections,
+    }).payload
+
     if (sharedSettlementId && canUseRemoteStore()) {
-      void deleteRemoteMember(memberId).catch(() => setRemoteStatus('참가자 삭제에 실패했어요.'))
+      suppressNextRemoteSaveRef.current = true
+      lastRemoteJsonRef.current = JSON.stringify(nextPayload)
+      setMembers(nextPayload.members)
+      setExpenses(nextPayload.expenses)
+      setTransfers(nextPayload.transfers)
+      setDuesCollections(nextPayload.duesCollections)
+      void (async () => {
+        try {
+          await repairRemoteReferences(sharedSettlementId, currentPayload, nextPayload)
+          await deleteRemoteMember(memberId)
+          setRemoteStatus(`${withSubjectParticle(memberName)} 삭제하고 관련 데이터를 정리했어요.`)
+        } catch {
+          setRemoteStatus('참가자 삭제 또는 관련 데이터 정리에 실패했어요.')
+        }
+      })()
     } else {
-      setMembers((current) => current.filter((member) => member.id !== memberId))
-      setExpenses((current) =>
-        current
-          .filter((expense) => expense.payerId !== memberId)
-          .map((expense) => ({ ...expense, participantIds: expense.participantIds.filter((id) => id !== memberId) }))
-          .filter((expense) => expense.participantIds.length > 0),
-      )
-      setTransfers((current) => current.filter((transfer) => transfer.fromId !== memberId && transfer.toId !== memberId))
-      setDuesCollections((current) =>
-        current
-          .filter((duesCollection) => duesCollection.receiverId !== memberId)
-          .map((duesCollection) => ({
-            ...duesCollection,
-            paidMemberIds: duesCollection.paidMemberIds.filter((id) => id !== memberId),
-          })),
-      )
+      setMembers(nextPayload.members)
+      setExpenses(nextPayload.expenses)
+      setTransfers(nextPayload.transfers)
+      setDuesCollections(nextPayload.duesCollections)
     }
     setExpenseForm((current) => ({
       ...current,
@@ -895,11 +998,19 @@ function App() {
       if (!Array.isArray(parsed.members) || !Array.isArray(parsed.expenses) || !Array.isArray(parsed.transfers)) {
         throw new Error('invalid')
       }
-      setMembers(parsed.members)
-      setExpenses(parsed.expenses)
-      setTransfers(parsed.transfers)
-      setDuesCollections(Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [])
-      setImportMessage('가져오기에 성공했어요. 이전 상태를 그대로 복구했습니다.')
+      const cleaned = sanitizePayload({
+        members: parsed.members,
+        expenses: parsed.expenses,
+        transfers: parsed.transfers,
+        duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
+      })
+      setMembers(cleaned.payload.members)
+      setExpenses(cleaned.payload.expenses)
+      setTransfers(cleaned.payload.transfers)
+      setDuesCollections(cleaned.payload.duesCollections)
+      setImportMessage(cleaned.changed
+        ? '가져오기에 성공했고, 삭제된 참가자가 남긴 연결 데이터도 정리했어요.'
+        : '가져오기에 성공했어요. 이전 상태를 그대로 복구했습니다.')
       setIsImportModalOpen(false)
       setImportText('')
     } catch {

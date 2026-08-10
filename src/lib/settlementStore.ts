@@ -286,6 +286,20 @@ export const updateRemoteExpense = async (expense: Expense) => {
   if (error) throw error
 }
 
+export const updateRemoteDuesCollections = async (settlementId: string, duesCollections: DuesCollection[]) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+
+  const current = await getSettlementBaseById(settlementId)
+  const currentTitle = parseTitleMetadata(current.title).title
+  const encodedTitle = encodeTitleMetadata(currentTitle, {
+    ...emptyPayload(),
+    duesCollections,
+  })
+
+  const { error } = await supabase.from(settlementsTable).update({ title: encodedTitle }).eq('id', settlementId)
+  if (error) throw error
+}
+
 export const deleteRemoteExpense = async (expenseId: string) => {
   if (!supabase) throw new Error('Supabase is not configured')
   const { error } = await supabase.from(expensesTable).delete().eq('id', expenseId)
