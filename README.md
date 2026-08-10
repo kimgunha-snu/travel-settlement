@@ -1,4 +1,33 @@
-# React + TypeScript + Vite
+# Trip Expense Split
+
+여행 지출, 회비 납부, 기존 송금을 반영해 추가 정산 금액을 계산하는 React 앱입니다.
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+검증 명령:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+## Supabase migration
+
+공유 정산의 전체 저장·초기화·JSON 가져오기는 DB 트랜잭션 RPC를 사용합니다. 앱을 배포하기 전에 아래 마이그레이션을 Supabase 프로젝트에 적용해야 합니다.
+
+```text
+supabase/migrations/202608100001_replace_settlement_content_atomic.sql
+```
+
+Supabase CLI를 연결한 프로젝트라면 `supabase db push`로 적용할 수 있고, 그렇지 않으면 SQL Editor에서 파일 내용을 실행할 수 있습니다.
+
+## Vite template notes
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

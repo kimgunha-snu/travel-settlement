@@ -17,45 +17,19 @@ import {
   updateRemoteMember,
   updateRemoteTransfer,
   updateSettlement,
-  type DuesCollection,
-  type SettlementPayload,
 } from './lib/settlementStore'
-
-type Member = {
-  id: string
-  name: string
-}
-
-type Expense = {
-  id: string
-  title: string
-  amount: number
-  payerId: string
-  participantIds: string[]
-}
-
-type Transfer = {
-  id: string
-  amount: number
-  fromId: string
-  toId: string
-}
-
-type BalanceRow = {
-  memberId: string
-  paid: number
-  share: number
-  transferredOut: number
-  transferredIn: number
-  net: number
-}
-
-type Settlement = {
-  id: string
-  fromId: string
-  toId: string
-  amount: number
-}
+import {
+  calculateBalances,
+  calculateSettlements,
+  getMemberReferences,
+  parseSettlementPayload,
+  sanitizeSettlementPayload,
+  type DuesCollection,
+  type Expense,
+  type Member,
+  type SettlementPayload,
+  type Transfer,
+} from './lib/settlement'
 
 type SavedSettlementLink = {
   id: string
@@ -84,50 +58,6 @@ const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
 })
 
 const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [], duesCollections: [] })
-
-const hasSameIds = (first: string[], second: string[]) => first.length === second.length && first.every((id, index) => id === second[index])
-
-const sanitizePayload = (payload: ImportPayload) => {
-  const memberIds = new Set(payload.members.map((member) => member.id))
-  let changed = false
-
-  const expenses = payload.expenses.flatMap((expense) => {
-    if (!memberIds.has(expense.payerId)) {
-      changed = true
-      return []
-    }
-
-    const participantIds = expense.participantIds.filter((id) => memberIds.has(id))
-    if (expense.participantIds.length > 0 && participantIds.length === 0) {
-      changed = true
-      return []
-    }
-    if (!hasSameIds(expense.participantIds, participantIds)) changed = true
-    return [{ ...expense, participantIds }]
-  })
-
-  const transfers = payload.transfers.filter((transfer) => {
-    const isValid = memberIds.has(transfer.fromId) && memberIds.has(transfer.toId)
-    if (!isValid) changed = true
-    return isValid
-  })
-
-  const duesCollections = payload.duesCollections.flatMap((duesCollection) => {
-    if (!memberIds.has(duesCollection.receiverId)) {
-      changed = true
-      return []
-    }
-
-    const paidMemberIds = duesCollection.paidMemberIds.filter((id) => id !== duesCollection.receiverId && memberIds.has(id))
-    if (!hasSameIds(duesCollection.paidMemberIds, paidMemberIds)) changed = true
-    return [{ ...duesCollection, paidMemberIds }]
-  })
-
-  return {
-    payload: { members: payload.members, expenses, transfers, duesCollections },
-    changed,
-  }
-}
 
 const repairRemoteReferences = async (
   settlementId: string,
@@ -172,7 +102,7 @@ const evaluateAmountInput = (value: string) => {
 
   try {
     const result = Function(`"use strict"; return (${sanitized})`)()
-    if (typeof result !== 'number' || !Number.isFinite(result)) return null
+    if (typeof result !== 'number' || !Number.isSafeInteger(result)) return null
     return result
   } catch {
     return null
@@ -185,13 +115,7 @@ const readStoredData = (): ImportPayload => {
     try {
       const raw = window.localStorage.getItem(`${cloneStorageKeyPrefix}${cloneId}`)
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<ImportPayload>
-        return sanitizePayload({
-          members: Array.isArray(parsed.members) ? parsed.members : [],
-          expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
-          transfers: Array.isArray(parsed.transfers) ? parsed.transfers : [],
-          duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
-        }).payload
+        return sanitizeSettlementPayload(parseSettlementPayload(JSON.parse(raw))).payload
       }
     } catch {
       return emptyPayload()
@@ -203,13 +127,7 @@ const readStoredData = (): ImportPayload => {
   try {
     const raw = window.localStorage.getItem(storageKey)
     if (!raw) return emptyPayload()
-    const parsed = JSON.parse(raw) as Partial<ImportPayload>
-    return sanitizePayload({
-      members: Array.isArray(parsed.members) ? parsed.members : [],
-      expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
-      transfers: Array.isArray(parsed.transfers) ? parsed.transfers : [],
-      duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
-    }).payload
+    return sanitizeSettlementPayload(parseSettlementPayload(JSON.parse(raw))).payload
   } catch {
     return emptyPayload()
   }
@@ -424,7 +342,7 @@ function App() {
       try {
         const record = await getSettlementByToken(settlementToken)
         if (isCancelled) return
-        const cleaned = sanitizePayload(record.data)
+        const cleaned = sanitizeSettlementPayload(parseSettlementPayload(record.data))
         suppressNextRemoteSaveRef.current = true
         lastRemoteJsonRef.current = JSON.stringify(cleaned.payload)
         setSharedSettlementId(record.id)
@@ -464,7 +382,7 @@ function App() {
     if (!sharedSettlementId || !canUseRemoteStore()) return
 
     const applyRemoteRecord = (record: { id: string; data: SettlementPayload }) => {
-      const cleaned = sanitizePayload(record.data)
+      const cleaned = sanitizeSettlementPayload(parseSettlementPayload(record.data))
       const nextJson = JSON.stringify(cleaned.payload)
       if (nextJson === lastRemoteJsonRef.current) {
         return
@@ -511,82 +429,12 @@ function App() {
   }, [sharedSettlementId, currentPayloadJson])
 
   const memberMap = useMemo(() => Object.fromEntries(members.map((member) => [member.id, member])), [members])
-
-  const balances = useMemo<BalanceRow[]>(() => {
-    const rows = new Map<string, BalanceRow>()
-    members.forEach((member) => {
-      rows.set(member.id, {
-        memberId: member.id,
-        paid: 0,
-        share: 0,
-        transferredOut: 0,
-        transferredIn: 0,
-        net: 0,
-      })
-    })
-
-    expenses.forEach((expense) => {
-      const payer = rows.get(expense.payerId)
-      if (!payer) return
-
-      const participants = expense.participantIds.length > 0
-        ? expense.participantIds.filter((participantId) => rows.has(participantId))
-        : [expense.payerId]
-      if (participants.length === 0) return
-
-      payer.paid += expense.amount
-      const perHead = expense.amount / participants.length
-      participants.forEach((participantId) => {
-        const participant = rows.get(participantId)
-        if (participant) participant.share += perHead
-      })
-    })
-
-    transfers.forEach((transfer) => {
-      const sender = rows.get(transfer.fromId)
-      const receiver = rows.get(transfer.toId)
-      if (!sender || !receiver) return
-      sender.transferredOut += transfer.amount
-      receiver.transferredIn += transfer.amount
-    })
-
-    duesCollections.forEach((duesCollection) => {
-      duesCollection.paidMemberIds.forEach((memberId) => {
-        if (memberId === duesCollection.receiverId) return
-        const payer = rows.get(memberId)
-        const receiver = rows.get(duesCollection.receiverId)
-        if (!payer || !receiver) return
-        payer.transferredOut += duesCollection.amount
-        receiver.transferredIn += duesCollection.amount
-      })
-    })
-
-    return Array.from(rows.values()).map((row) => ({
-      ...row,
-      net: row.paid - row.share + row.transferredOut - row.transferredIn,
-    }))
-  }, [duesCollections, expenses, members, transfers])
-
-  const settlements = useMemo<Settlement[]>(() => {
-    const creditors = balances.filter((row) => row.net > 0.5).map((row) => ({ memberId: row.memberId, amount: row.net }))
-    const debtors = balances.filter((row) => row.net < -0.5).map((row) => ({ memberId: row.memberId, amount: -row.net }))
-    const result: Settlement[] = []
-    let i = 0
-    let j = 0
-
-    while (i < debtors.length && j < creditors.length) {
-      const debtor = debtors[i]
-      const creditor = creditors[j]
-      const amount = Math.min(debtor.amount, creditor.amount)
-      result.push({ id: `${debtor.memberId}-${creditor.memberId}`, fromId: debtor.memberId, toId: creditor.memberId, amount })
-      debtor.amount -= amount
-      creditor.amount -= amount
-      if (debtor.amount <= 0.5) i += 1
-      if (creditor.amount <= 0.5) j += 1
-    }
-
-    return result
-  }, [balances])
+  const balances = useMemo(() => calculateBalances(currentPayload), [currentPayload])
+  const settlementResult = useMemo(() => calculateSettlements(balances), [balances])
+  const settlements = settlementResult.settlements
+  const settlementError = settlementResult.imbalance === 0
+    ? ''
+    : `정산 합계가 ${currency.format(Math.abs(settlementResult.imbalance))}만큼 맞지 않아 자동 정산을 중단했어요. 데이터를 확인해 주세요.`
 
   const allMembersSelected = members.length > 0 && expenseForm.participantIds.length === members.length
 
@@ -637,10 +485,23 @@ function App() {
 
   const removeMember = (memberId: string) => {
     const memberName = memberMap[memberId]?.name ?? '이 참가자'
-    const shouldDelete = window.confirm(`${withObjectParticle(memberName)} 삭제하면 관련 지출/송금 데이터도 함께 바뀔 수 있어요. 정말 삭제할까요?`)
+    const references = getMemberReferences(currentPayload, memberId)
+    if (references.total > 0) {
+      const details = [
+        references.paidExpenses > 0 ? `결제 지출 ${references.paidExpenses}건` : '',
+        references.participatedExpenses > 0 ? `참여 지출 ${references.participatedExpenses}건` : '',
+        references.transfers > 0 ? `송금 ${references.transfers}건` : '',
+        references.receivedDuesCollections > 0 ? `받은 회비 ${references.receivedDuesCollections}건` : '',
+        references.paidDuesCollections > 0 ? `납부 회비 ${references.paidDuesCollections}건` : '',
+      ].filter(Boolean).join(', ')
+      setRemoteStatus(`${withSubjectParticle(memberName)} ${details}에 연결돼 있어 삭제할 수 없어요. 관련 내역을 먼저 수정하거나 삭제해 주세요.`)
+      return
+    }
+
+    const shouldDelete = window.confirm(`${withObjectParticle(memberName)} 참가자 목록에서 삭제할까요?`)
     if (!shouldDelete) return
 
-    const nextPayload = sanitizePayload({
+    const nextPayload = sanitizeSettlementPayload({
       members: members.filter((member) => member.id !== memberId),
       expenses,
       transfers,
@@ -790,7 +651,7 @@ function App() {
 
     const nextPayload = { members, expenses, transfers, duesCollections: nextDuesCollections }
     lastRemoteJsonRef.current = JSON.stringify(nextPayload)
-    void updateSettlement(sharedSettlementId, nextPayload).catch((error) => {
+    void updateRemoteDuesCollections(sharedSettlementId, nextDuesCollections).catch((error) => {
       const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
       setRemoteStatus(`회비 저장 실패: ${message}`)
     })
@@ -843,6 +704,10 @@ function App() {
   }
 
   const copySettlementSummary = async () => {
+    if (settlementError) {
+      setExportMessage(settlementError)
+      return
+    }
     if (settlements.length === 0) {
       setExportMessage('복사할 자동 정산 결과가 없어요.')
       return
@@ -863,18 +728,33 @@ function App() {
     }
   }
 
-  const resetCurrentSettlement = () => {
+  const resetCurrentSettlement = async () => {
     const shouldReset = window.confirm('현재 정산 내용을 전부 비울까요? 이 작업은 되돌리기 어려워요.')
     if (!shouldReset) return
 
-    setMembers([])
-    setExpenses([])
-    setTransfers([])
-    setDuesCollections([])
+    const nextPayload = emptyPayload()
+    if (sharedSettlementId && canUseRemoteStore()) {
+      setRemoteStatus('공유 정산을 초기화하고 있어요...')
+      try {
+        await updateSettlement(sharedSettlementId, nextPayload)
+        suppressNextRemoteSaveRef.current = true
+        lastRemoteJsonRef.current = JSON.stringify(nextPayload)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
+        setRemoteStatus(`공유 정산 초기화 실패: ${message}`)
+        return
+      }
+    }
+
+    setMembers(nextPayload.members)
+    setExpenses(nextPayload.expenses)
+    setTransfers(nextPayload.transfers)
+    setDuesCollections(nextPayload.duesCollections)
     setNewMemberName('')
     setExpenseForm({ title: '', amount: '', payerId: '', participantIds: [] })
     setTransferForm({ amount: '', fromId: '', toId: '' })
     setCollectDuesForm({ title: '', amount: '', receiverId: '' })
+    if (sharedSettlementId) setRemoteStatus('공유 정산을 초기화했어요.')
     setExportMessage('현재 정산을 비웠어요.')
   }
 
@@ -992,29 +872,35 @@ function App() {
     }
   }
 
-  const importData = () => {
+  const importData = async () => {
     try {
-      const parsed = JSON.parse(importText) as ImportPayload
-      if (!Array.isArray(parsed.members) || !Array.isArray(parsed.expenses) || !Array.isArray(parsed.transfers)) {
-        throw new Error('invalid')
+      const cleaned = sanitizeSettlementPayload(parseSettlementPayload(JSON.parse(importText)))
+      let importedPayload = cleaned.payload
+      if (sharedSettlementId && canUseRemoteStore()) {
+        const shouldOverwrite = window.confirm('가져온 데이터로 현재 공유 정산을 덮어쓸까요?')
+        if (!shouldOverwrite) return
+        importedPayload = normalizePayloadForRemote(cleaned.payload).payload
+        setRemoteStatus('가져온 데이터를 공유 정산에 저장하고 있어요...')
+        await updateSettlement(sharedSettlementId, importedPayload)
+        suppressNextRemoteSaveRef.current = true
+        lastRemoteJsonRef.current = JSON.stringify(importedPayload)
+        setRemoteStatus('가져온 데이터를 공유 정산에 저장했어요.')
       }
-      const cleaned = sanitizePayload({
-        members: parsed.members,
-        expenses: parsed.expenses,
-        transfers: parsed.transfers,
-        duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
-      })
-      setMembers(cleaned.payload.members)
-      setExpenses(cleaned.payload.expenses)
-      setTransfers(cleaned.payload.transfers)
-      setDuesCollections(cleaned.payload.duesCollections)
+      setMembers(importedPayload.members)
+      setExpenses(importedPayload.expenses)
+      setTransfers(importedPayload.transfers)
+      setDuesCollections(importedPayload.duesCollections)
+      setExpenseForm({ title: '', amount: '', payerId: importedPayload.members[0]?.id ?? '', participantIds: importedPayload.members.map((member) => member.id) })
+      setTransferForm({ amount: '', fromId: importedPayload.members[0]?.id ?? '', toId: importedPayload.members[1]?.id ?? importedPayload.members[0]?.id ?? '' })
+      setCollectDuesForm({ title: '', amount: '', receiverId: importedPayload.members[0]?.id ?? '' })
       setImportMessage(cleaned.changed
         ? '가져오기에 성공했고, 삭제된 참가자가 남긴 연결 데이터도 정리했어요.'
         : '가져오기에 성공했어요. 이전 상태를 그대로 복구했습니다.')
       setIsImportModalOpen(false)
       setImportText('')
-    } catch {
-      setImportMessage('가져오기에 실패했어요. export한 JSON 전체를 그대로 붙여넣어 주세요.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
+      setImportMessage(`가져오기에 실패했어요: ${message}`)
     }
   }
 
@@ -1321,7 +1207,9 @@ function App() {
             <button onClick={copySettlementSummary}>정산 결과 복사</button>
           </div>
           <div className="settlement-list">
-            {settlements.length === 0 ? (
+            {settlementError ? (
+              <div className="empty">{settlementError}</div>
+            ) : settlements.length === 0 ? (
               <div className="empty">현재 추가 송금 없이도 거의 정산이 맞아떨어져요.</div>
             ) : (
               settlements.map((settlement, index) => (

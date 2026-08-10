@@ -1,39 +1,7 @@
 import { supabase, isSupabaseConfigured } from './supabase'
+import type { DuesCollection, Expense, Member, SettlementPayload, Transfer } from './settlement'
 
-export type Member = {
-  id: string
-  name: string
-}
-
-export type Expense = {
-  id: string
-  title: string
-  amount: number
-  payerId: string
-  participantIds: string[]
-}
-
-export type Transfer = {
-  id: string
-  amount: number
-  fromId: string
-  toId: string
-}
-
-export type DuesCollection = {
-  id: string
-  title: string
-  amount: number
-  receiverId: string
-  paidMemberIds: string[]
-}
-
-export type SettlementPayload = {
-  members: Member[]
-  expenses: Expense[]
-  transfers: Transfer[]
-  duesCollections: DuesCollection[]
-}
+export type { DuesCollection, Expense, Member, SettlementPayload, Transfer } from './settlement'
 
 export type SettlementRecord = {
   id: string
@@ -202,46 +170,29 @@ const getSettlementData = async (settlement: Omit<SettlementRecord, 'data'>) => 
   }
 }
 
-export const replaceSettlementContent = async (id: string, payload: SettlementPayload) => {
+const replaceSettlementContent = async (id: string, payload: SettlementPayload, encodedTitle: string) => {
   if (!supabase) throw new Error('Supabase is not configured')
 
-  await supabase.from(expensesTable).delete().eq('settlement_id', id)
-  await supabase.from(transfersTable).delete().eq('settlement_id', id)
-  await supabase.from(membersTable).delete().eq('settlement_id', id)
+  const { error } = await supabase.rpc('replace_settlement_content_atomic', {
+    p_settlement_id: id,
+    p_encoded_title: encodedTitle,
+    p_members: payload.members.map((member) => ({ id: member.id, name: member.name })),
+    p_expenses: payload.expenses.map((expense) => ({
+      id: expense.id,
+      title: expense.title,
+      amount: expense.amount,
+      payer_member_id: expense.payerId,
+      participant_member_ids: expense.participantIds,
+    })),
+    p_transfers: payload.transfers.map((transfer) => ({
+      id: transfer.id,
+      amount: transfer.amount,
+      from_member_id: transfer.fromId,
+      to_member_id: transfer.toId,
+    })),
+  })
 
-  if (payload.members.length > 0) {
-    const { error } = await supabase.from(membersTable).insert(
-      payload.members.map((member) => ({ id: member.id, settlement_id: id, name: member.name })),
-    )
-    if (error) throw error
-  }
-
-  if (payload.expenses.length > 0) {
-    const { error } = await supabase.from(expensesTable).insert(
-      payload.expenses.map((expense) => ({
-        id: expense.id,
-        settlement_id: id,
-        title: expense.title,
-        amount: expense.amount,
-        payer_member_id: expense.payerId,
-        participant_member_ids: expense.participantIds,
-      })),
-    )
-    if (error) throw error
-  }
-
-  if (payload.transfers.length > 0) {
-    const { error } = await supabase.from(transfersTable).insert(
-      payload.transfers.map((transfer) => ({
-        id: transfer.id,
-        settlement_id: id,
-        amount: transfer.amount,
-        from_member_id: transfer.fromId,
-        to_member_id: transfer.toId,
-      })),
-    )
-    if (error) throw error
-  }
+  if (error) throw error
 }
 
 export const addRemoteMember = async (settlementId: string, member: Member) => {
@@ -383,10 +334,7 @@ export const updateSettlement = async (id: string, payload: SettlementPayload, t
   const currentTitle = parseTitleMetadata(current.title).title
   const encodedTitle = encodeTitleMetadata(title ?? currentTitle, payload)
 
-  const { error } = await supabase.from(settlementsTable).update({ title: encodedTitle }).eq('id', id)
-  if (error) throw error
-
-  await replaceSettlementContent(id, payload)
+  await replaceSettlementContent(id, payload, encodedTitle)
   return getSettlementById(id)
 }
 
