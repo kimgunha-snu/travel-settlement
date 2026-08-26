@@ -60,6 +60,13 @@ type ExpenseFormState = ExpenseMoneyDraft & {
   participantIds: string[]
 }
 
+type CurrencyToggleProps = {
+  value: string
+  foreignCurrency: string
+  foreignCurrencyName: string
+  onChange: (currency: string) => void
+}
+
 const currency = new Intl.NumberFormat('ko-KR', {
   style: 'currency',
   currency: 'KRW',
@@ -88,6 +95,9 @@ const supportedForeignCurrencies = [
   { code: 'CAD', label: '캐나다 달러 (CAD)' },
 ] as const
 const defaultForeignCurrencySettings: ForeignCurrencySettings = defaultCurrencySettings
+const getForeignCurrencyName = (currencyCode: string) => (
+  supportedForeignCurrencies.find((item) => item.code === currencyCode)?.label.replace(` (${currencyCode})`, '') ?? currencyCode
+)
 const createId = () => Math.random().toString(36).slice(2, 10)
 const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
   const random = Math.random() * 16 | 0
@@ -358,6 +368,29 @@ const normalizePayloadForRemote = (payload: SettlementPayload) => {
   }
 }
 
+const CurrencyToggle = ({ value, foreignCurrency, foreignCurrencyName, onChange }: CurrencyToggleProps) => (
+  <div className="currency-toggle" role="group" aria-label="결제 통화">
+    <button
+      type="button"
+      className={value === 'KRW' ? 'is-active' : ''}
+      aria-pressed={value === 'KRW'}
+      onClick={() => onChange('KRW')}
+    >
+      <strong>원화</strong>
+      <small>KRW</small>
+    </button>
+    <button
+      type="button"
+      className={value === foreignCurrency ? 'is-active' : ''}
+      aria-pressed={value === foreignCurrency}
+      onClick={() => onChange(foreignCurrency)}
+    >
+      <strong>{foreignCurrencyName}</strong>
+      <small>{foreignCurrency}</small>
+    </button>
+  </div>
+)
+
 function App() {
   const [initialPayload] = useState<SettlementPayload>(() => {
     const storedPayload = readStoredData()
@@ -600,6 +633,10 @@ function App() {
   const settlementResult = useMemo(() => calculateSettlements(balances), [balances])
   const settlements = settlementResult.settlements
   const referenceRateExpenseCount = expenses.filter((expense) => expense.conversionMethod === 'rate').length
+  const configuredForeignCurrencyName = getForeignCurrencyName(foreignCurrencySettings.currency)
+  const editForeignCurrency = expenseEditForm.currency === 'KRW'
+    ? foreignCurrencySettings.currency
+    : expenseEditForm.currency
   const settlementError = settlementResult.imbalance === 0
     ? ''
     : `정산 합계가 ${currency.format(Math.abs(settlementResult.imbalance))}만큼 맞지 않아 자동 정산을 중단했어요. 데이터를 확인해 주세요.`
@@ -792,6 +829,19 @@ function App() {
       amount: '',
       currency: nextCurrency,
       exchangeRate: nextCurrency === 'KRW' ? '' : foreignCurrencySettings.exchangeRate,
+    }))
+  }
+
+  const setExpenseEditCurrency = (nextCurrency: string) => {
+    setExpenseEditForm((current) => ({
+      ...current,
+      amount: '',
+      currency: nextCurrency,
+      exchangeRate: nextCurrency === 'KRW'
+        ? ''
+        : nextCurrency === foreignCurrencySettings.currency
+          ? foreignCurrencySettings.exchangeRate
+          : current.exchangeRate,
     }))
   }
 
@@ -1377,12 +1427,12 @@ function App() {
             <div className="form-grid">
               <input value={expenseForm.title} onChange={(event) => setExpenseForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
               {foreignCurrencySettings.enabled && (
-                <select aria-label="결제 통화" value={expenseForm.currency} onChange={(event) => setExpenseCurrency(event.target.value)}>
-                  <option value="KRW">대한민국 원 (KRW)</option>
-                  <option value={foreignCurrencySettings.currency}>
-                    {supportedForeignCurrencies.find((item) => item.code === foreignCurrencySettings.currency)?.label ?? foreignCurrencySettings.currency}
-                  </option>
-                </select>
+                <CurrencyToggle
+                  value={expenseForm.currency}
+                  foreignCurrency={foreignCurrencySettings.currency}
+                  foreignCurrencyName={configuredForeignCurrencyName}
+                  onChange={setExpenseCurrency}
+                />
               )}
               <input
                 value={expenseForm.amount}
@@ -1900,24 +1950,12 @@ function App() {
             <div className="form-grid">
               <input value={expenseEditForm.title} onChange={(event) => setExpenseEditForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
               {(foreignCurrencySettings.enabled || expenseEditForm.currency !== 'KRW') && (
-                <select
-                  aria-label="결제 통화"
+                <CurrencyToggle
                   value={expenseEditForm.currency}
-                  onChange={(event) => setExpenseEditForm((current) => ({
-                    ...current,
-                    amount: '',
-                    currency: event.target.value,
-                    exchangeRate: event.target.value === 'KRW' ? '' : foreignCurrencySettings.exchangeRate,
-                  }))}
-                >
-                  <option value="KRW">대한민국 원 (KRW)</option>
-                  {expenseEditForm.currency !== 'KRW' && expenseEditForm.currency !== foreignCurrencySettings.currency && (
-                    <option value={expenseEditForm.currency}>{expenseEditForm.currency}</option>
-                  )}
-                  <option value={foreignCurrencySettings.currency}>
-                    {supportedForeignCurrencies.find((item) => item.code === foreignCurrencySettings.currency)?.label ?? foreignCurrencySettings.currency}
-                  </option>
-                </select>
+                  foreignCurrency={editForeignCurrency}
+                  foreignCurrencyName={getForeignCurrencyName(editForeignCurrency)}
+                  onChange={setExpenseEditCurrency}
+                />
               )}
               <input
                 value={expenseEditForm.amount}

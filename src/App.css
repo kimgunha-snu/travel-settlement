@@ -257,6 +257,53 @@ select {
   background: #fff;
 }
 
+.currency-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.currency-toggle button {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 6px;
+  border-radius: 8px;
+  background: transparent;
+  color: #475569;
+  line-height: 1.15;
+}
+
+.currency-toggle button:hover {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.currency-toggle button.is-active {
+  background: #4f46e5;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.24);
+}
+
+.currency-toggle strong,
+.currency-toggle small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.currency-toggle small {
+  color: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 button {
   border: none;
   border-radius: 12px;
