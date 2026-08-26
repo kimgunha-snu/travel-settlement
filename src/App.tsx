@@ -13,6 +13,7 @@ import {
   getSettlementByToken,
   subscribeSettlement,
   updateRemoteDuesCollections,
+  updateRemoteCurrencySettings,
   updateRemoteExpense,
   updateRemoteMember,
   updateRemoteTransfer,
@@ -22,9 +23,11 @@ import {
   calculateBalances,
   calculateSettlements,
   convertForeignAmountToWon,
+  defaultCurrencySettings,
   getMemberReferences,
   parseSettlementPayload,
   sanitizeSettlementPayload,
+  type CurrencySettings,
   type DuesCollection,
   type Expense,
   type Member,
@@ -42,11 +45,7 @@ type SavedSettlementLink = {
 
 type ImportPayload = SettlementPayload
 
-type ForeignCurrencySettings = {
-  enabled: boolean
-  currency: string
-  exchangeRate: string
-}
+type ForeignCurrencySettings = CurrencySettings
 
 type ExpenseMoneyDraft = {
   amount: string
@@ -87,11 +86,7 @@ const supportedForeignCurrencies = [
   { code: 'GBP', label: '영국 파운드 (GBP)' },
   { code: 'CAD', label: '캐나다 달러 (CAD)' },
 ] as const
-const defaultForeignCurrencySettings: ForeignCurrencySettings = {
-  enabled: false,
-  currency: 'JPY',
-  exchangeRate: '',
-}
+const defaultForeignCurrencySettings: ForeignCurrencySettings = defaultCurrencySettings
 const createId = () => Math.random().toString(36).slice(2, 10)
 const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
   const random = Math.random() * 16 | 0
@@ -99,7 +94,13 @@ const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
   return value.toString(16)
 })
 
-const emptyPayload = (): ImportPayload => ({ members: [], expenses: [], transfers: [], duesCollections: [] })
+const emptyPayload = (): ImportPayload => ({
+  members: [],
+  expenses: [],
+  transfers: [],
+  duesCollections: [],
+  currencySettings: { ...defaultForeignCurrencySettings },
+})
 
 const repairRemoteReferences = async (
   settlementId: string,
@@ -165,10 +166,10 @@ const evaluatePositiveNumberInput = (value: string) => {
   }
 }
 
-const readForeignCurrencySettings = (): ForeignCurrencySettings => {
+const readLegacyForeignCurrencySettings = (): ForeignCurrencySettings => {
   try {
     const raw = window.localStorage.getItem(foreignCurrencySettingsStorageKey)
-    if (!raw) return defaultForeignCurrencySettings
+    if (!raw) return { ...defaultForeignCurrencySettings }
     const parsed = JSON.parse(raw) as Partial<ForeignCurrencySettings>
     const currency = supportedForeignCurrencies.some((item) => item.code === parsed.currency)
       ? parsed.currency as string
@@ -178,7 +179,7 @@ const readForeignCurrencySettings = (): ForeignCurrencySettings => {
       : ''
     return { enabled: parsed.enabled === true, currency, exchangeRate }
   } catch {
-    return defaultForeignCurrencySettings
+    return { ...defaultForeignCurrencySettings }
   }
 }
 
@@ -216,13 +217,21 @@ const formatForeignCurrency = (amount: number, currencyCode: string) => new Intl
 
 const rateFormatter = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 6 })
 
+const parseStoredData = (raw: string): ImportPayload => {
+  const parsed = JSON.parse(raw) as Record<string, unknown>
+  const payload = sanitizeSettlementPayload(parseSettlementPayload(parsed)).payload
+  return Object.prototype.hasOwnProperty.call(parsed, 'currencySettings')
+    ? payload
+    : { ...payload, currencySettings: readLegacyForeignCurrencySettings() }
+}
+
 const readStoredData = (): ImportPayload => {
   const cloneId = getCloneIdFromUrl()
   if (cloneId) {
     try {
       const raw = window.localStorage.getItem(`${cloneStorageKeyPrefix}${cloneId}`)
       if (raw) {
-        return sanitizeSettlementPayload(parseSettlementPayload(JSON.parse(raw))).payload
+        return parseStoredData(raw)
       }
     } catch {
       return emptyPayload()
@@ -234,7 +243,7 @@ const readStoredData = (): ImportPayload => {
   try {
     const raw = window.localStorage.getItem(storageKey)
     if (!raw) return emptyPayload()
-    return sanitizeSettlementPayload(parseSettlementPayload(JSON.parse(raw))).payload
+    return parseStoredData(raw)
   } catch {
     return emptyPayload()
   }
@@ -332,13 +341,13 @@ const normalizePayloadForRemote = (payload: SettlementPayload) => {
   }))
 
   return {
-    payload: { members, expenses, transfers, duesCollections },
+    payload: { members, expenses, transfers, duesCollections, currencySettings: payload.currencySettings },
     memberIdMap,
   }
 }
 
 function App() {
-  const [foreignCurrencySettings, setForeignCurrencySettings] = useState<ForeignCurrencySettings>(() => readForeignCurrencySettings())
+  const [foreignCurrencySettings, setForeignCurrencySettings] = useState<ForeignCurrencySettings>(() => readStoredData().currencySettings)
   const [members, setMembers] = useState<Member[]>(() => readStoredData().members)
   const [expenses, setExpenses] = useState<Expense[]>(() => readStoredData().expenses)
   const [transfers, setTransfers] = useState<Transfer[]>(() => readStoredData().transfers)
@@ -398,7 +407,9 @@ function App() {
   const lastRemoteJsonRef = useRef('')
   const suppressNextRemoteSaveRef = useRef(false)
 
-  const currentPayload: SettlementPayload = useMemo(() => ({ members, expenses, transfers, duesCollections }), [duesCollections, expenses, members, transfers])
+  const currentPayload: SettlementPayload = useMemo(() => (
+    { members, expenses, transfers, duesCollections, currencySettings: foreignCurrencySettings }
+  ), [duesCollections, expenses, foreignCurrencySettings, members, transfers])
   const currentPayloadJson = useMemo(() => JSON.stringify(currentPayload), [currentPayload])
   const currentShareUrl = useMemo(() => {
     if (!sharedSettlementId || !sharedSettlementToken) return shareUrl
@@ -445,10 +456,6 @@ function App() {
   }, [currentPayloadJson])
 
   useEffect(() => {
-    window.localStorage.setItem(foreignCurrencySettingsStorageKey, JSON.stringify(foreignCurrencySettings))
-  }, [foreignCurrencySettings])
-
-  useEffect(() => {
     getSettlementIdFromUrl()
     const settlementToken = getShareTokenFromUrl() || getSettlementTokenFromUrl()
     if (!settlementToken) return
@@ -472,6 +479,12 @@ function App() {
         setExpenses(cleaned.payload.expenses)
         setTransfers(cleaned.payload.transfers)
         setDuesCollections(cleaned.payload.duesCollections)
+        setForeignCurrencySettings(cleaned.payload.currencySettings)
+        setExpenseForm((current) => ({
+          ...current,
+          currency: cleaned.payload.currencySettings.enabled ? cleaned.payload.currencySettings.currency : 'KRW',
+          exchangeRate: cleaned.payload.currencySettings.enabled ? cleaned.payload.currencySettings.exchangeRate : '',
+        }))
         setRemoteStatus(cleaned.changed ? '삭제된 참가자의 연결 데이터를 정리하고 있어요.' : `공유 정산 연결됨: ${record.id}`)
         const nextShareUrl = createShareUrl(record.share_token)
         setShareUrl(nextShareUrl)
@@ -514,6 +527,12 @@ function App() {
       setExpenses(cleaned.payload.expenses)
       setTransfers(cleaned.payload.transfers)
       setDuesCollections(cleaned.payload.duesCollections)
+      setForeignCurrencySettings(cleaned.payload.currencySettings)
+      setExpenseForm((current) => ({
+        ...current,
+        currency: cleaned.payload.currencySettings.enabled ? cleaned.payload.currencySettings.currency : 'KRW',
+        exchangeRate: cleaned.payload.currencySettings.enabled ? cleaned.payload.currencySettings.exchangeRate : '',
+      }))
       setRemoteStatus(cleaned.changed ? '삭제된 참가자의 연결 데이터를 정리하고 있어요.' : `다른 사람이 수정한 내용을 반영했어요: ${record.id}`)
       if (cleaned.changed) {
         void repairRemoteReferences(record.id, record.data, cleaned.payload)
@@ -628,6 +647,7 @@ function App() {
       expenses,
       transfers,
       duesCollections,
+      currencySettings: foreignCurrencySettings,
     }).payload
 
     if (sharedSettlementId && canUseRemoteStore()) {
@@ -684,19 +704,40 @@ function App() {
     }))
   }
 
+  const syncForeignCurrencySettings = (nextSettings: ForeignCurrencySettings) => {
+    setForeignCurrencySettings(nextSettings)
+
+    if (!sharedSettlementId || !canUseRemoteStore()) return
+
+    const nextPayload: SettlementPayload = {
+      members,
+      expenses,
+      transfers,
+      duesCollections,
+      currencySettings: nextSettings,
+    }
+    lastRemoteJsonRef.current = JSON.stringify(nextPayload)
+    void updateRemoteCurrencySettings(sharedSettlementId, nextSettings).catch((error) => {
+      const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
+      setRemoteStatus(`외화 설정 저장 실패: ${message}`)
+    })
+  }
+
   const setForeignCurrencyEnabled = (enabled: boolean) => {
-    setForeignCurrencySettings((current) => ({ ...current, enabled }))
+    const nextSettings = { ...foreignCurrencySettings, enabled }
+    syncForeignCurrencySettings(nextSettings)
     setExpenseForm((current) => ({
       ...current,
       amount: '',
-      currency: enabled ? foreignCurrencySettings.currency : 'KRW',
-      exchangeRate: enabled ? foreignCurrencySettings.exchangeRate : '',
+      currency: enabled ? nextSettings.currency : 'KRW',
+      exchangeRate: enabled ? nextSettings.exchangeRate : '',
     }))
   }
 
   const setDefaultForeignCurrency = (nextCurrency: string) => {
     const previousCurrency = foreignCurrencySettings.currency
-    setForeignCurrencySettings((current) => ({ ...current, currency: nextCurrency, exchangeRate: '' }))
+    const nextSettings = { ...foreignCurrencySettings, currency: nextCurrency, exchangeRate: '' }
+    syncForeignCurrencySettings(nextSettings)
     setExpenseForm((current) => current.currency === previousCurrency
       ? { ...current, amount: '', currency: nextCurrency, exchangeRate: '' }
       : current)
@@ -706,7 +747,8 @@ function App() {
   }
 
   const setDefaultExchangeRate = (nextExchangeRate: string) => {
-    setForeignCurrencySettings((current) => ({ ...current, exchangeRate: nextExchangeRate }))
+    const nextSettings = { ...foreignCurrencySettings, exchangeRate: nextExchangeRate }
+    syncForeignCurrencySettings(nextSettings)
     setExpenseForm((current) => current.currency === foreignCurrencySettings.currency
       ? { ...current, exchangeRate: nextExchangeRate }
       : current)
@@ -813,7 +855,13 @@ function App() {
 
     if (!sharedSettlementId || !canUseRemoteStore()) return
 
-    const nextPayload = { members, expenses, transfers, duesCollections: nextDuesCollections }
+    const nextPayload: SettlementPayload = {
+      members,
+      expenses,
+      transfers,
+      duesCollections: nextDuesCollections,
+      currencySettings: foreignCurrencySettings,
+    }
     lastRemoteJsonRef.current = JSON.stringify(nextPayload)
     void updateRemoteDuesCollections(sharedSettlementId, nextDuesCollections).catch((error) => {
       const message = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error)
@@ -853,8 +901,7 @@ function App() {
   }
 
   const exportData = () => {
-    const payload: ImportPayload = { members, expenses, transfers, duesCollections }
-    const text = JSON.stringify(payload, null, 2)
+    const text = JSON.stringify(currentPayload, null, 2)
     const blob = new Blob([text], { type: 'application/json;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -914,14 +961,15 @@ function App() {
     setExpenses(nextPayload.expenses)
     setTransfers(nextPayload.transfers)
     setDuesCollections(nextPayload.duesCollections)
+    setForeignCurrencySettings(nextPayload.currencySettings)
     setNewMemberName('')
     setExpenseForm({
       title: '',
       amount: '',
       payerId: '',
       participantIds: [],
-      currency: foreignCurrencySettings.enabled ? foreignCurrencySettings.currency : 'KRW',
-      exchangeRate: foreignCurrencySettings.exchangeRate,
+      currency: nextPayload.currencySettings.enabled ? nextPayload.currencySettings.currency : 'KRW',
+      exchangeRate: nextPayload.currencySettings.exchangeRate,
     })
     setTransferForm({ amount: '', fromId: '', toId: '' })
     setCollectDuesForm({ title: '', amount: '', receiverId: '' })
@@ -971,6 +1019,7 @@ function App() {
         setExpenses(normalizedPayload.expenses)
         setTransfers(normalizedPayload.transfers)
         setDuesCollections(normalizedPayload.duesCollections)
+        setForeignCurrencySettings(normalizedPayload.currencySettings)
         setExpenseForm((current) => ({
           ...current,
           payerId: memberIdMap.get(current.payerId) ?? current.payerId,
@@ -1061,13 +1110,14 @@ function App() {
       setExpenses(importedPayload.expenses)
       setTransfers(importedPayload.transfers)
       setDuesCollections(importedPayload.duesCollections)
+      setForeignCurrencySettings(importedPayload.currencySettings)
       setExpenseForm({
         title: '',
         amount: '',
         payerId: importedPayload.members[0]?.id ?? '',
         participantIds: importedPayload.members.map((member) => member.id),
-        currency: foreignCurrencySettings.enabled ? foreignCurrencySettings.currency : 'KRW',
-        exchangeRate: foreignCurrencySettings.exchangeRate,
+        currency: importedPayload.currencySettings.enabled ? importedPayload.currencySettings.currency : 'KRW',
+        exchangeRate: importedPayload.currencySettings.exchangeRate,
       })
       setTransferForm({ amount: '', fromId: importedPayload.members[0]?.id ?? '', toId: importedPayload.members[1]?.id ?? importedPayload.members[0]?.id ?? '' })
       setCollectDuesForm({ title: '', amount: '', receiverId: importedPayload.members[0]?.id ?? '' })
@@ -1608,7 +1658,7 @@ function App() {
           <div className="section-header-with-actions">
             <div>
               <h2>설정</h2>
-              <p className="helper">필요할 때만 외화 입력을 켤 수 있어요. 자동 정산 결과는 항상 원화로 계산됩니다.</p>
+              <p className="helper">외화 사용 여부와 기준 환율은 공유 정산 참여자 모두에게 동일하게 적용되고, 자동 정산 결과는 항상 원화로 계산됩니다.</p>
             </div>
             <label className="setting-toggle">
               <input

@@ -30,11 +30,24 @@ export type DuesCollection = {
   paidMemberIds: string[]
 }
 
+export type CurrencySettings = {
+  enabled: boolean
+  currency: string
+  exchangeRate: string
+}
+
+export const defaultCurrencySettings: CurrencySettings = {
+  enabled: false,
+  currency: 'JPY',
+  exchangeRate: '',
+}
+
 export type SettlementPayload = {
   members: Member[]
   expenses: Expense[]
   transfers: Transfer[]
   duesCollections: DuesCollection[]
+  currencySettings: CurrencySettings
 }
 
 export type BalanceRow = {
@@ -130,6 +143,26 @@ const readRecordArray = (record: Record<string, unknown>, key: string, optional 
   return value
 }
 
+const readCurrencySettings = (record: Record<string, unknown>): CurrencySettings => {
+  const value = record.currencySettings
+  if (value === undefined) return { ...defaultCurrencySettings }
+  if (!isRecord(value)) throw new Error('currencySettings must be an object')
+
+  const currency = readString(value, 'currency').toUpperCase()
+  if (!/^[A-Z]{3}$/.test(currency) || currency === 'KRW') {
+    throw new Error('currencySettings.currency must be a non-KRW ISO currency code')
+  }
+
+  if (typeof value.enabled !== 'boolean') throw new Error('currencySettings.enabled must be a boolean')
+  if (typeof value.exchangeRate !== 'string') throw new Error('currencySettings.exchangeRate must be a string')
+
+  return {
+    enabled: value.enabled,
+    currency,
+    exchangeRate: value.exchangeRate,
+  }
+}
+
 export const parseSettlementPayload = (value: unknown): SettlementPayload => {
   if (!isRecord(value)) throw new Error('payload must be an object')
 
@@ -163,8 +196,9 @@ export const parseSettlementPayload = (value: unknown): SettlementPayload => {
     receiverId: readString(duesCollection, 'receiverId'),
     paidMemberIds: readStringArray(duesCollection, 'paidMemberIds'),
   }))
+  const currencySettings = readCurrencySettings(value)
 
-  return { members, expenses, transfers, duesCollections }
+  return { members, expenses, transfers, duesCollections, currencySettings }
 }
 
 const uniqueIds = (ids: string[]) => Array.from(new Set(ids))
@@ -224,7 +258,7 @@ export const sanitizeSettlementPayload = (payload: SettlementPayload) => {
   })
 
   return {
-    payload: { members, expenses, transfers, duesCollections },
+    payload: { members, expenses, transfers, duesCollections, currencySettings: payload.currencySettings },
     changed,
   }
 }

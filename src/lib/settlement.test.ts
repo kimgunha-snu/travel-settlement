@@ -3,6 +3,7 @@ import {
   calculateBalances,
   calculateSettlements,
   convertForeignAmountToWon,
+  defaultCurrencySettings,
   getMemberReferences,
   parseSettlementPayload,
   sanitizeSettlementPayload,
@@ -20,6 +21,7 @@ const payload = (overrides: Partial<SettlementPayload> = {}): SettlementPayload 
   expenses: [],
   transfers: [],
   duesCollections: [],
+  currencySettings: { ...defaultCurrencySettings },
   ...overrides,
 })
 
@@ -141,6 +143,16 @@ describe('payload validation and sanitation', () => {
     expect(() => parseSettlementPayload(payload({
       expenses: [{ ...foreignExpense, exchangeRate: undefined }],
     }))).toThrow('foreign expense metadata must be complete')
+  })
+
+  it('keeps shared currency settings and defaults legacy payloads safely', () => {
+    const configured = parseSettlementPayload(payload({
+      currencySettings: { enabled: true, currency: 'JPY', exchangeRate: '9.3' },
+    }))
+    expect(configured.currencySettings).toEqual({ enabled: true, currency: 'JPY', exchangeRate: '9.3' })
+
+    const legacyPayload = { members, expenses: [], transfers: [], duesCollections: [] }
+    expect(parseSettlementPayload(legacyPayload).currencySettings).toEqual(defaultCurrencySettings)
   })
 })
 

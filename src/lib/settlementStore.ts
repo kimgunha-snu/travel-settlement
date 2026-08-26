@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConfigured } from './supabase'
-import type { DuesCollection, Expense, Member, SettlementPayload, Transfer } from './settlement'
+import { defaultCurrencySettings, type CurrencySettings, type DuesCollection, type Expense, type Member, type SettlementPayload, type Transfer } from './settlement'
 
-export type { DuesCollection, Expense, Member, SettlementPayload, Transfer } from './settlement'
+export type { CurrencySettings, DuesCollection, Expense, Member, SettlementPayload, Transfer } from './settlement'
 
 export type SettlementRecord = {
   id: string
@@ -46,7 +46,13 @@ const transfersTable = 'settlement_transfers'
 const settlementTitleMetaPrefix = '__travel_settlement_meta_v1__:'
 const missingForeignColumnsMessage = '공유 정산에서 외화 지출을 저장하려면 최신 Supabase 마이그레이션을 먼저 적용해 주세요.'
 
-const emptyPayload = (): SettlementPayload => ({ members: [], expenses: [], transfers: [], duesCollections: [] })
+const emptyPayload = (): SettlementPayload => ({
+  members: [],
+  expenses: [],
+  transfers: [],
+  duesCollections: [],
+  currencySettings: { ...defaultCurrencySettings },
+})
 
 const isMissingForeignColumnsError = (error: { code?: string; message?: string } | null) => Boolean(
   error
@@ -82,30 +88,57 @@ const assertForeignExpenseColumns = async () => {
 
 const parseTitleMetadata = (title: string | null) => {
   if (!title?.startsWith(settlementTitleMetaPrefix)) {
-    return { title, duesCollections: [] as DuesCollection[] }
+    return {
+      title,
+      duesCollections: [] as DuesCollection[],
+      currencySettings: { ...defaultCurrencySettings },
+    }
   }
 
   try {
     const parsed = JSON.parse(title.slice(settlementTitleMetaPrefix.length)) as {
       title?: string | null
       duesCollections?: DuesCollection[]
+      currencySettings?: Partial<CurrencySettings>
     }
+
+    const configuredCurrency = parsed.currencySettings?.currency?.toUpperCase()
+    const currencySettings: CurrencySettings = configuredCurrency
+      && /^[A-Z]{3}$/.test(configuredCurrency)
+      && configuredCurrency !== 'KRW'
+      && typeof parsed.currencySettings?.enabled === 'boolean'
+      && typeof parsed.currencySettings?.exchangeRate === 'string'
+      ? {
+          enabled: parsed.currencySettings.enabled,
+          currency: configuredCurrency,
+          exchangeRate: parsed.currencySettings.exchangeRate,
+        }
+      : { ...defaultCurrencySettings }
 
     return {
       title: parsed.title ?? '공유 정산',
       duesCollections: Array.isArray(parsed.duesCollections) ? parsed.duesCollections : [],
+      currencySettings,
     }
   } catch {
-    return { title: '공유 정산', duesCollections: [] as DuesCollection[] }
+    return {
+      title: '공유 정산',
+      duesCollections: [] as DuesCollection[],
+      currencySettings: { ...defaultCurrencySettings },
+    }
   }
 }
 
 const encodeTitleMetadata = (title: string | null | undefined, payload: SettlementPayload) => {
-  if (payload.duesCollections.length === 0) return title ?? '공유 정산'
+  const hasDefaultCurrencySettings = payload.currencySettings.enabled === defaultCurrencySettings.enabled
+    && payload.currencySettings.currency === defaultCurrencySettings.currency
+    && payload.currencySettings.exchangeRate === defaultCurrencySettings.exchangeRate
+  if (payload.duesCollections.length === 0 && hasDefaultCurrencySettings) return title ?? '공유 정산'
 
   return `${settlementTitleMetaPrefix}${JSON.stringify({
     title: title ?? '공유 정산',
     duesCollections: payload.duesCollections,
+    currencySettings: payload.currencySettings,
   })}`
 }
 
@@ -114,6 +147,7 @@ const mapPayloadFromRows = (
   expenses: ExpenseRow[],
   transfers: TransferRow[],
   duesCollections: DuesCollection[],
+  currencySettings: CurrencySettings,
 ): SettlementPayload => ({
   members: members.map((member) => ({ id: member.id, name: member.name })),
   expenses: expenses.map((expense) => ({
@@ -141,6 +175,7 @@ const mapPayloadFromRows = (
     toId: transfer.to_member_id,
   })),
   duesCollections,
+  currencySettings,
 })
 
 const getSettlementBaseById = async (id: string) => {
@@ -214,6 +249,7 @@ const getSettlementData = async (settlement: Omit<SettlementRecord, 'data'>) => 
       expenses as ExpenseRow[],
       transfers as TransferRow[],
       titleMetadata.duesCollections,
+      titleMetadata.currencySettings,
     ),
   }
 }
@@ -301,10 +337,26 @@ export const updateRemoteDuesCollections = async (settlementId: string, duesColl
   if (!supabase) throw new Error('Supabase is not configured')
 
   const current = await getSettlementBaseById(settlementId)
-  const currentTitle = parseTitleMetadata(current.title).title
-  const encodedTitle = encodeTitleMetadata(currentTitle, {
+  const currentMetadata = parseTitleMetadata(current.title)
+  const encodedTitle = encodeTitleMetadata(currentMetadata.title, {
     ...emptyPayload(),
     duesCollections,
+    currencySettings: currentMetadata.currencySettings,
+  })
+
+  const { error } = await supabase.from(settlementsTable).update({ title: encodedTitle }).eq('id', settlementId)
+  if (error) throw error
+}
+
+export const updateRemoteCurrencySettings = async (settlementId: string, currencySettings: CurrencySettings) => {
+  if (!supabase) throw new Error('Supabase is not configured')
+
+  const current = await getSettlementBaseById(settlementId)
+  const currentMetadata = parseTitleMetadata(current.title)
+  const encodedTitle = encodeTitleMetadata(currentMetadata.title, {
+    ...emptyPayload(),
+    duesCollections: currentMetadata.duesCollections,
+    currencySettings,
   })
 
   const { error } = await supabase.from(settlementsTable).update({ title: encodedTitle }).eq('id', settlementId)
@@ -377,6 +429,12 @@ export const subscribeSettlement = (
       const settlementId = String((payload.new as { settlement_id?: string })?.settlement_id ?? (payload.old as { settlement_id?: string })?.settlement_id ?? '')
       if (settlementId !== id) return
       await emit('transfers')
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: settlementsTable }, async (payload) => {
+      onDebug?.(`raw-event:settlements:${String((payload.new as { id?: string })?.id ?? 'unknown')}`)
+      const settlementId = String((payload.new as { id?: string })?.id ?? '')
+      if (settlementId !== id) return
+      await emit('settlements')
     })
     .subscribe((status) => {
       onDebug?.(`channel:${status}`)
