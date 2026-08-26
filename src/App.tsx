@@ -73,10 +73,8 @@ const currency = new Intl.NumberFormat('ko-KR', {
   maximumFractionDigits: 0,
 })
 
-const storageKey = 'travel-settlement-app-data'
 const cloneStorageKeyPrefix = 'travel-settlement-app-clone-'
 const savedLinksStorageKey = 'travel-settlement-app-saved-links'
-const foreignCurrencySettingsStorageKey = 'travel-settlement-app-foreign-currency-settings'
 const supportedForeignCurrencies = [
   { code: 'JPY', label: '일본 엔 (JPY)' },
   { code: 'USD', label: '미국 달러 (USD)' },
@@ -177,23 +175,6 @@ const evaluatePositiveNumberInput = (value: string) => {
   }
 }
 
-const readLegacyForeignCurrencySettings = (): ForeignCurrencySettings => {
-  try {
-    const raw = window.localStorage.getItem(foreignCurrencySettingsStorageKey)
-    if (!raw) return { ...defaultForeignCurrencySettings }
-    const parsed = JSON.parse(raw) as Partial<ForeignCurrencySettings>
-    const currency = supportedForeignCurrencies.some((item) => item.code === parsed.currency)
-      ? parsed.currency as string
-      : defaultForeignCurrencySettings.currency
-    const exchangeRate = typeof parsed.exchangeRate === 'string' && (parsed.exchangeRate === '' || evaluatePositiveNumberInput(parsed.exchangeRate) !== null)
-      ? parsed.exchangeRate
-      : ''
-    return { enabled: parsed.enabled === true, currency, exchangeRate }
-  } catch {
-    return { ...defaultForeignCurrencySettings }
-  }
-}
-
 const resolveExpenseMoney = (draft: ExpenseMoneyDraft): Pick<Expense, 'amount' | 'originalAmount' | 'originalCurrency' | 'exchangeRate' | 'conversionMethod'> | null => {
   if (draft.currency === 'KRW') {
     const amount = evaluateAmountInput(draft.amount)
@@ -239,36 +220,20 @@ const formatForeignCurrency = (amount: number, currencyCode: string) => new Intl
 
 const rateFormatter = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 6 })
 
-const parseStoredData = (raw: string): ImportPayload => {
-  const parsed = JSON.parse(raw) as Record<string, unknown>
-  const payload = sanitizeSettlementPayload(parseSettlementPayload(parsed)).payload
-  return Object.prototype.hasOwnProperty.call(parsed, 'currencySettings')
-    ? payload
-    : { ...payload, currencySettings: readLegacyForeignCurrencySettings() }
-}
-
 const readStoredData = (): ImportPayload => {
   const cloneId = getCloneIdFromUrl()
   if (cloneId) {
     try {
       const raw = window.localStorage.getItem(`${cloneStorageKeyPrefix}${cloneId}`)
       if (raw) {
-        return parseStoredData(raw)
+        return sanitizeSettlementPayload(parseSettlementPayload(JSON.parse(raw))).payload
       }
     } catch {
       return emptyPayload()
     }
   }
 
-  if (shouldStartFreshFromUrl()) return emptyPayload()
-
-  try {
-    const raw = window.localStorage.getItem(storageKey)
-    if (!raw) return emptyPayload()
-    return parseStoredData(raw)
-  } catch {
-    return emptyPayload()
-  }
+  return emptyPayload()
 }
 
 const readSavedSettlementLinks = (): SavedSettlementLink[] => {
@@ -291,8 +256,6 @@ const getSettlementIdFromUrl = () => getUrl().searchParams.get('settlement') ?? 
 const getSettlementTokenFromUrl = () => getUrl().searchParams.get('token') ?? ''
 const getShareTokenFromUrl = () => getUrl().searchParams.get('share') ?? ''
 const getCloneIdFromUrl = () => getUrl().searchParams.get('clone') ?? ''
-
-const shouldStartFreshFromUrl = () => getUrl().searchParams.get('fresh') === '1'
 
 const createShareUrl = (shareToken: string) => {
   const url = getUrl()
@@ -490,8 +453,6 @@ function App() {
   }
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, currentPayloadJson)
-
     const url = getUrl()
     const cloneId = url.searchParams.get('clone')
     const shouldClearFresh = url.searchParams.get('fresh') === '1'
@@ -505,7 +466,7 @@ function App() {
     if (cloneId || shouldClearFresh) {
       window.history.replaceState({}, '', url.toString())
     }
-  }, [currentPayloadJson])
+  }, [])
 
   useEffect(() => {
     getSettlementIdFromUrl()
