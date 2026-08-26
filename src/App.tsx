@@ -559,10 +559,6 @@ function App() {
     : `정산 합계가 ${currency.format(Math.abs(settlementResult.imbalance))}만큼 맞지 않아 자동 정산을 중단했어요. 데이터를 확인해 주세요.`
 
   const allMembersSelected = members.length > 0 && expenseForm.participantIds.length === members.length
-  const expenseMoneyPreview = resolveExpenseMoney(expenseForm)
-  const expenseEditMoneyPreview = resolveExpenseMoney(expenseEditForm)
-  const expenseFormExchangeRate = evaluatePositiveNumberInput(expenseForm.exchangeRate)
-  const expenseEditExchangeRate = evaluatePositiveNumberInput(expenseEditForm.exchangeRate)
 
   const addMember = async () => {
     const name = newMemberName.trim()
@@ -1319,34 +1315,6 @@ function App() {
                 ))}
               </select>
             </div>
-            {foreignCurrencySettings.enabled && expenseForm.currency !== 'KRW' && (
-              <div className="foreign-expense-controls">
-                <div className="reference-rate-card">
-                  <span>설정 기준 환율</span>
-                  {expenseFormExchangeRate !== null ? (
-                    <>
-                      <strong>1 {expenseForm.currency} = {rateFormatter.format(expenseFormExchangeRate)}원</strong>
-                      <small>외화 지출은 이 환율로만 원화 환산됩니다.</small>
-                    </>
-                  ) : (
-                    <strong>설정에서 기준 환율을 입력해 주세요.</strong>
-                  )}
-                  <a href="#currency-settings">기준 환율 변경</a>
-                </div>
-                <div className="conversion-preview" aria-live="polite">
-                  {expenseMoneyPreview?.originalAmount && expenseMoneyPreview.originalCurrency ? (
-                    <>
-                      <span>{formatForeignCurrency(expenseMoneyPreview.originalAmount, expenseMoneyPreview.originalCurrency)}</span>
-                      <span>→</span>
-                      <strong>정산 반영 {currency.format(expenseMoneyPreview.amount)}</strong>
-                      <em className="estimate-badge">기준 환율</em>
-                    </>
-                  ) : (
-                    <span>외화 금액을 입력하면 기준 환율로 계산한 원화 정산액을 보여드려요.</span>
-                  )}
-                </div>
-              </div>
-            )}
             <div className="participant-box">
               <p className="helper">누가 같이 썼는지 선택</p>
               <div className="checkbox-list">
@@ -1882,33 +1850,6 @@ function App() {
                 ))}
               </select>
             </div>
-            {expenseEditForm.currency !== 'KRW' && (
-              <div className="foreign-expense-controls">
-                <div className="reference-rate-card">
-                  <span>{expenseEditForm.currency === foreignCurrencySettings.currency ? '설정 기준 환율' : '저장된 적용 환율'}</span>
-                  {expenseEditExchangeRate !== null ? (
-                    <>
-                      <strong>1 {expenseEditForm.currency} = {rateFormatter.format(expenseEditExchangeRate)}원</strong>
-                      <small>수정 저장하면 이 환율로 원화 금액을 다시 계산합니다.</small>
-                    </>
-                  ) : (
-                    <strong>설정에서 기준 환율을 입력해 주세요.</strong>
-                  )}
-                </div>
-                <div className="conversion-preview" aria-live="polite">
-                  {expenseEditMoneyPreview?.originalAmount && expenseEditMoneyPreview.originalCurrency ? (
-                    <>
-                      <span>{formatForeignCurrency(expenseEditMoneyPreview.originalAmount, expenseEditMoneyPreview.originalCurrency)}</span>
-                      <span>→</span>
-                      <strong>정산 반영 {currency.format(expenseEditMoneyPreview.amount)}</strong>
-                      <em className="estimate-badge">기준 환율</em>
-                    </>
-                  ) : (
-                    <span>외화 금액을 입력하면 기준 환율로 계산한 원화 정산액을 보여드려요.</span>
-                  )}
-                </div>
-              </div>
-            )}
             <div className="checkbox-list">
               {members.map((member) => (
                 <label key={member.id}>
