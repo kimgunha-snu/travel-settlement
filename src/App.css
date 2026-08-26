@@ -34,6 +34,10 @@
   margin-top: 8px;
 }
 
+.settings-panel {
+  scroll-margin-top: 18px;
+}
+
 .export-message {
   width: 100%;
 }
@@ -123,6 +127,163 @@ h3 {
   display: grid;
   gap: 16px;
   min-width: 0;
+}
+
+.expense-section-heading {
+  display: grid;
+  gap: 8px;
+}
+
+.expense-section-heading h2 {
+  margin-bottom: 0;
+}
+
+.foreign-mode-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #4338ca;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.foreign-mode-status a {
+  color: #4f46e5;
+  font-weight: 700;
+}
+
+.foreign-expense-controls {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #c7d2fe;
+  border-radius: 16px;
+  background: #eef2ff;
+}
+
+.conversion-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.conversion-choices label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.conversion-choices label.selected {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px #6366f1;
+}
+
+.conversion-choices input,
+.setting-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.currency-input-label {
+  display: grid;
+  gap: 7px;
+}
+
+.currency-input-label > span,
+.base-currency-card > span {
+  color: #475569;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.conversion-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 24px;
+  color: #475569;
+}
+
+.conversion-preview strong {
+  color: #312e81;
+}
+
+.estimate-badge,
+.actual-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-style: normal;
+  font-weight: 800;
+  vertical-align: middle;
+}
+
+.estimate-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.actual-badge {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.foreign-settlement-warning {
+  margin: 4px 0 0;
+  color: #92400e;
+  font-size: 0.9rem;
+}
+
+.foreign-history-detail {
+  color: #4338ca !important;
+}
+
+.setting-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 180px;
+  padding: 11px 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.setting-toggle span {
+  display: grid;
+  gap: 2px;
+}
+
+.setting-toggle small,
+.base-currency-card small {
+  color: #64748b;
+}
+
+.currency-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.base-currency-card {
+  display: grid;
+  gap: 7px;
+  padding: 11px 12px;
+  border: 1px solid #dbe3f0;
+  border-radius: 12px;
+  background: #f8fafc;
 }
 
 input,
@@ -454,7 +615,9 @@ th {
 @media (max-width: 840px) {
   .two-column,
   .form-grid,
-  .inline-form {
+  .inline-form,
+  .currency-settings-grid,
+  .conversion-choices {
     grid-template-columns: 1fr;
   }
 

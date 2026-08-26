@@ -41,6 +41,26 @@ type SavedSettlementLink = {
 
 type ImportPayload = SettlementPayload
 
+type ForeignCurrencySettings = {
+  enabled: boolean
+  currency: string
+  exchangeRate: string
+}
+
+type ExpenseMoneyDraft = {
+  amount: string
+  currency: string
+  exchangeRate: string
+  conversionMethod: 'rate' | 'actual'
+  actualKrwAmount: string
+}
+
+type ExpenseFormState = ExpenseMoneyDraft & {
+  title: string
+  payerId: string
+  participantIds: string[]
+}
+
 const currency = new Intl.NumberFormat('ko-KR', {
   style: 'currency',
   currency: 'KRW',
@@ -50,6 +70,29 @@ const currency = new Intl.NumberFormat('ko-KR', {
 const storageKey = 'travel-settlement-app-data'
 const cloneStorageKeyPrefix = 'travel-settlement-app-clone-'
 const savedLinksStorageKey = 'travel-settlement-app-saved-links'
+const foreignCurrencySettingsStorageKey = 'travel-settlement-app-foreign-currency-settings'
+const supportedForeignCurrencies = [
+  { code: 'JPY', label: '일본 엔 (JPY)' },
+  { code: 'USD', label: '미국 달러 (USD)' },
+  { code: 'EUR', label: '유로 (EUR)' },
+  { code: 'THB', label: '태국 바트 (THB)' },
+  { code: 'VND', label: '베트남 동 (VND)' },
+  { code: 'CNY', label: '중국 위안 (CNY)' },
+  { code: 'TWD', label: '대만 달러 (TWD)' },
+  { code: 'HKD', label: '홍콩 달러 (HKD)' },
+  { code: 'SGD', label: '싱가포르 달러 (SGD)' },
+  { code: 'PHP', label: '필리핀 페소 (PHP)' },
+  { code: 'MYR', label: '말레이시아 링깃 (MYR)' },
+  { code: 'IDR', label: '인도네시아 루피아 (IDR)' },
+  { code: 'AUD', label: '호주 달러 (AUD)' },
+  { code: 'GBP', label: '영국 파운드 (GBP)' },
+  { code: 'CAD', label: '캐나다 달러 (CAD)' },
+] as const
+const defaultForeignCurrencySettings: ForeignCurrencySettings = {
+  enabled: false,
+  currency: 'JPY',
+  exchangeRate: '',
+}
 const createId = () => Math.random().toString(36).slice(2, 10)
 const createUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
   const random = Math.random() * 16 | 0
@@ -108,6 +151,79 @@ const evaluateAmountInput = (value: string) => {
     return null
   }
 }
+
+const evaluatePositiveNumberInput = (value: string) => {
+  const sanitized = value.replace(/,/g, '').trim()
+  if (!sanitized) return null
+  if (!/^[0-9+\-*/().\s]+$/.test(sanitized)) return null
+
+  try {
+    const result = Function(`"use strict"; return (${sanitized})`)()
+    if (typeof result !== 'number' || !Number.isFinite(result) || result <= 0 || result > Number.MAX_SAFE_INTEGER) return null
+    return result
+  } catch {
+    return null
+  }
+}
+
+const readForeignCurrencySettings = (): ForeignCurrencySettings => {
+  try {
+    const raw = window.localStorage.getItem(foreignCurrencySettingsStorageKey)
+    if (!raw) return defaultForeignCurrencySettings
+    const parsed = JSON.parse(raw) as Partial<ForeignCurrencySettings>
+    const currency = supportedForeignCurrencies.some((item) => item.code === parsed.currency)
+      ? parsed.currency as string
+      : defaultForeignCurrencySettings.currency
+    const exchangeRate = typeof parsed.exchangeRate === 'string' && (parsed.exchangeRate === '' || evaluatePositiveNumberInput(parsed.exchangeRate) !== null)
+      ? parsed.exchangeRate
+      : ''
+    return { enabled: parsed.enabled === true, currency, exchangeRate }
+  } catch {
+    return defaultForeignCurrencySettings
+  }
+}
+
+const resolveExpenseMoney = (draft: ExpenseMoneyDraft): Pick<Expense, 'amount' | 'originalAmount' | 'originalCurrency' | 'exchangeRate' | 'conversionMethod'> | null => {
+  if (draft.currency === 'KRW') {
+    const amount = evaluateAmountInput(draft.amount)
+    return amount !== null && amount > 0 ? { amount } : null
+  }
+
+  const originalAmount = evaluatePositiveNumberInput(draft.amount)
+  if (originalAmount === null) return null
+
+  if (draft.conversionMethod === 'actual') {
+    const amount = evaluateAmountInput(draft.actualKrwAmount)
+    if (amount === null || amount <= 0) return null
+    return {
+      amount,
+      originalAmount,
+      originalCurrency: draft.currency,
+      exchangeRate: amount / originalAmount,
+      conversionMethod: 'actual',
+    }
+  }
+
+  const exchangeRate = evaluatePositiveNumberInput(draft.exchangeRate)
+  if (exchangeRate === null) return null
+  const amount = Math.round(originalAmount * exchangeRate)
+  if (!Number.isSafeInteger(amount) || amount <= 0) return null
+  return {
+    amount,
+    originalAmount,
+    originalCurrency: draft.currency,
+    exchangeRate,
+    conversionMethod: 'rate',
+  }
+}
+
+const formatForeignCurrency = (amount: number, currencyCode: string) => new Intl.NumberFormat('ko-KR', {
+  style: 'currency',
+  currency: currencyCode,
+  maximumFractionDigits: 4,
+}).format(amount)
+
+const rateFormatter = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 6 })
 
 const readStoredData = (): ImportPayload => {
   const cloneId = getCloneIdFromUrl()
@@ -231,17 +347,22 @@ const normalizePayloadForRemote = (payload: SettlementPayload) => {
 }
 
 function App() {
+  const [foreignCurrencySettings, setForeignCurrencySettings] = useState<ForeignCurrencySettings>(() => readForeignCurrencySettings())
   const [members, setMembers] = useState<Member[]>(() => readStoredData().members)
   const [expenses, setExpenses] = useState<Expense[]>(() => readStoredData().expenses)
   const [transfers, setTransfers] = useState<Transfer[]>(() => readStoredData().transfers)
   const [duesCollections, setDuesCollections] = useState<DuesCollection[]>(() => readStoredData().duesCollections)
   const [newMemberName, setNewMemberName] = useState('')
-  const [expenseForm, setExpenseForm] = useState({
+  const [expenseForm, setExpenseForm] = useState<ExpenseFormState>(() => ({
     title: '',
     amount: '',
     payerId: '',
     participantIds: [] as string[],
-  })
+    currency: foreignCurrencySettings.enabled ? foreignCurrencySettings.currency : 'KRW',
+    exchangeRate: foreignCurrencySettings.exchangeRate,
+    conversionMethod: 'rate',
+    actualKrwAmount: '',
+  }))
   const [transferForm, setTransferForm] = useState({
     amount: '',
     fromId: '',
@@ -275,7 +396,16 @@ function App() {
   const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
   const [editingDuesCollectionId, setEditingDuesCollectionId] = useState<string | null>(null)
   const [isMembersModalOpen, setIsMembersModalOpen] = useState(false)
-  const [expenseEditForm, setExpenseEditForm] = useState({ title: '', amount: '', payerId: '', participantIds: [] as string[] })
+  const [expenseEditForm, setExpenseEditForm] = useState<ExpenseFormState>({
+    title: '',
+    amount: '',
+    payerId: '',
+    participantIds: [],
+    currency: 'KRW',
+    exchangeRate: '',
+    conversionMethod: 'rate',
+    actualKrwAmount: '',
+  })
   const [transferEditForm, setTransferEditForm] = useState({ amount: '', fromId: '', toId: '' })
   const [duesEditForm, setDuesEditForm] = useState({ title: '', amount: '', receiverId: '', paidMemberIds: [] as string[] })
   const lastRemoteJsonRef = useRef('')
@@ -326,6 +456,10 @@ function App() {
       window.history.replaceState({}, '', url.toString())
     }
   }, [currentPayloadJson])
+
+  useEffect(() => {
+    window.localStorage.setItem(foreignCurrencySettingsStorageKey, JSON.stringify(foreignCurrencySettings))
+  }, [foreignCurrencySettings])
 
   useEffect(() => {
     getSettlementIdFromUrl()
@@ -432,11 +566,14 @@ function App() {
   const balances = useMemo(() => calculateBalances(currentPayload), [currentPayload])
   const settlementResult = useMemo(() => calculateSettlements(balances), [balances])
   const settlements = settlementResult.settlements
+  const estimatedForeignExpenseCount = expenses.filter((expense) => expense.conversionMethod === 'rate').length
   const settlementError = settlementResult.imbalance === 0
     ? ''
     : `정산 합계가 ${currency.format(Math.abs(settlementResult.imbalance))}만큼 맞지 않아 자동 정산을 중단했어요. 데이터를 확인해 주세요.`
 
   const allMembersSelected = members.length > 0 && expenseForm.participantIds.length === members.length
+  const expenseMoneyPreview = resolveExpenseMoney(expenseForm)
+  const expenseEditMoneyPreview = resolveExpenseMoney(expenseEditForm)
 
   const addMember = async () => {
     const name = newMemberName.trim()
@@ -562,8 +699,46 @@ function App() {
     }))
   }
 
+  const setForeignCurrencyEnabled = (enabled: boolean) => {
+    setForeignCurrencySettings((current) => ({ ...current, enabled }))
+    setExpenseForm((current) => ({
+      ...current,
+      amount: '',
+      currency: enabled ? foreignCurrencySettings.currency : 'KRW',
+      exchangeRate: enabled ? foreignCurrencySettings.exchangeRate : '',
+      conversionMethod: 'rate',
+      actualKrwAmount: '',
+    }))
+  }
+
+  const setDefaultForeignCurrency = (nextCurrency: string) => {
+    const previousCurrency = foreignCurrencySettings.currency
+    setForeignCurrencySettings((current) => ({ ...current, currency: nextCurrency }))
+    setExpenseForm((current) => current.currency === previousCurrency
+      ? { ...current, amount: '', currency: nextCurrency }
+      : current)
+  }
+
+  const setDefaultExchangeRate = (nextExchangeRate: string) => {
+    setForeignCurrencySettings((current) => ({ ...current, exchangeRate: nextExchangeRate }))
+    setExpenseForm((current) => current.currency === foreignCurrencySettings.currency && current.conversionMethod === 'rate'
+      ? { ...current, exchangeRate: nextExchangeRate }
+      : current)
+  }
+
+  const setExpenseCurrency = (nextCurrency: string) => {
+    setExpenseForm((current) => ({
+      ...current,
+      amount: '',
+      currency: nextCurrency,
+      exchangeRate: nextCurrency === 'KRW' ? '' : foreignCurrencySettings.exchangeRate,
+      conversionMethod: 'rate',
+      actualKrwAmount: '',
+    }))
+  }
+
   const addExpense = async () => {
-    const amount = evaluateAmountInput(expenseForm.amount)
+    const expenseMoney = resolveExpenseMoney(expenseForm)
     if (!expenseForm.title.trim()) {
       setRemoteStatus('지출 항목명을 입력해 주세요.')
       return
@@ -572,15 +747,17 @@ function App() {
       setRemoteStatus('지출 결제자를 선택해 주세요.')
       return
     }
-    if (amount === null || amount <= 0) {
-      setRemoteStatus('지출 금액을 올바르게 입력해 주세요.')
+    if (!expenseMoney) {
+      setRemoteStatus(expenseForm.currency === 'KRW'
+        ? '지출 금액을 올바르게 입력해 주세요.'
+        : '외화 금액과 환율 또는 실제 원화 청구액을 올바르게 입력해 주세요.')
       return
     }
 
     const expense = {
       id: sharedSettlementId ? createUuid() : createId(),
       title: expenseForm.title.trim(),
-      amount,
+      ...expenseMoney,
       payerId: expenseForm.payerId,
       participantIds: expenseForm.participantIds.length > 0 ? expenseForm.participantIds : [expenseForm.payerId],
     }
@@ -598,7 +775,7 @@ function App() {
       setExpenses((current) => [...current, expense])
     }
 
-    setExpenseForm((current) => ({ ...current, title: '', amount: '' }))
+    setExpenseForm((current) => ({ ...current, title: '', amount: '', actualKrwAmount: '' }))
   }
 
   const addTransfer = async () => {
@@ -751,7 +928,16 @@ function App() {
     setTransfers(nextPayload.transfers)
     setDuesCollections(nextPayload.duesCollections)
     setNewMemberName('')
-    setExpenseForm({ title: '', amount: '', payerId: '', participantIds: [] })
+    setExpenseForm({
+      title: '',
+      amount: '',
+      payerId: '',
+      participantIds: [],
+      currency: foreignCurrencySettings.enabled ? foreignCurrencySettings.currency : 'KRW',
+      exchangeRate: foreignCurrencySettings.exchangeRate,
+      conversionMethod: 'rate',
+      actualKrwAmount: '',
+    })
     setTransferForm({ amount: '', fromId: '', toId: '' })
     setCollectDuesForm({ title: '', amount: '', receiverId: '' })
     if (sharedSettlementId) setRemoteStatus('공유 정산을 초기화했어요.')
@@ -890,7 +1076,16 @@ function App() {
       setExpenses(importedPayload.expenses)
       setTransfers(importedPayload.transfers)
       setDuesCollections(importedPayload.duesCollections)
-      setExpenseForm({ title: '', amount: '', payerId: importedPayload.members[0]?.id ?? '', participantIds: importedPayload.members.map((member) => member.id) })
+      setExpenseForm({
+        title: '',
+        amount: '',
+        payerId: importedPayload.members[0]?.id ?? '',
+        participantIds: importedPayload.members.map((member) => member.id),
+        currency: foreignCurrencySettings.enabled ? foreignCurrencySettings.currency : 'KRW',
+        exchangeRate: foreignCurrencySettings.exchangeRate,
+        conversionMethod: 'rate',
+        actualKrwAmount: '',
+      })
       setTransferForm({ amount: '', fromId: importedPayload.members[0]?.id ?? '', toId: importedPayload.members[1]?.id ?? importedPayload.members[0]?.id ?? '' })
       setCollectDuesForm({ title: '', amount: '', receiverId: importedPayload.members[0]?.id ?? '' })
       setImportMessage(cleaned.changed
@@ -908,9 +1103,13 @@ function App() {
     setEditingExpenseId(expense.id)
     setExpenseEditForm({
       title: expense.title,
-      amount: String(expense.amount),
+      amount: String(expense.originalAmount ?? expense.amount),
       payerId: expense.payerId,
       participantIds: [...expense.participantIds],
+      currency: expense.originalCurrency ?? 'KRW',
+      exchangeRate: expense.exchangeRate ? String(expense.exchangeRate) : foreignCurrencySettings.exchangeRate,
+      conversionMethod: expense.conversionMethod ?? 'rate',
+      actualKrwAmount: expense.conversionMethod === 'actual' ? String(expense.amount) : '',
     })
   }
 
@@ -935,13 +1134,16 @@ function App() {
 
   const saveExpenseEdit = () => {
     if (!editingExpenseId) return
-    const amount = evaluateAmountInput(expenseEditForm.amount)
-    if (!expenseEditForm.title.trim() || !expenseEditForm.payerId || amount === null || amount <= 0) return
+    const expenseMoney = resolveExpenseMoney(expenseEditForm)
+    if (!expenseEditForm.title.trim() || !expenseEditForm.payerId || !expenseMoney) {
+      setRemoteStatus('지출 수정 내용을 올바르게 입력해 주세요.')
+      return
+    }
 
     const nextExpense = {
       id: editingExpenseId,
       title: expenseEditForm.title.trim(),
-      amount,
+      ...expenseMoney,
       payerId: expenseEditForm.payerId,
       participantIds: expenseEditForm.participantIds.length > 0 ? expenseEditForm.participantIds : [expenseEditForm.payerId],
     }
@@ -1095,10 +1297,31 @@ function App() {
 
         <section className="panel two-column">
           <div className="form-section">
-            <h2>지출 추가</h2>
+            <div className="expense-section-heading">
+              <h2>지출 추가</h2>
+              {foreignCurrencySettings.enabled && (
+                <div className="foreign-mode-status">
+                  해외 통화 사용 중 · 기본 {foreignCurrencySettings.currency}
+                  <a href="#currency-settings">설정 변경</a>
+                </div>
+              )}
+            </div>
             <div className="form-grid">
               <input value={expenseForm.title} onChange={(event) => setExpenseForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
-              <input value={expenseForm.amount} onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액 (예: 12000+8000)" inputMode="text" />
+              {foreignCurrencySettings.enabled && (
+                <select aria-label="결제 통화" value={expenseForm.currency} onChange={(event) => setExpenseCurrency(event.target.value)}>
+                  <option value="KRW">대한민국 원 (KRW)</option>
+                  <option value={foreignCurrencySettings.currency}>
+                    {supportedForeignCurrencies.find((item) => item.code === foreignCurrencySettings.currency)?.label ?? foreignCurrencySettings.currency}
+                  </option>
+                </select>
+              )}
+              <input
+                value={expenseForm.amount}
+                onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))}
+                placeholder={expenseForm.currency === 'KRW' ? '금액 (예: 12000+8000)' : `${expenseForm.currency} 결제 금액`}
+                inputMode={expenseForm.currency === 'KRW' ? 'text' : 'decimal'}
+              />
               <select value={expenseForm.payerId} onChange={(event) => setExpenseForm((current) => ({ ...current, payerId: event.target.value }))}>
                 <option value="">결제자 선택</option>
                 {members.map((member) => (
@@ -1106,6 +1329,65 @@ function App() {
                 ))}
               </select>
             </div>
+            {foreignCurrencySettings.enabled && expenseForm.currency !== 'KRW' && (
+              <div className="foreign-expense-controls">
+                <div className="conversion-choices" role="radiogroup" aria-label="원화 환산 방식">
+                  <label className={expenseForm.conversionMethod === 'rate' ? 'selected' : ''}>
+                    <input
+                      type="radio"
+                      name="expense-conversion-method"
+                      checked={expenseForm.conversionMethod === 'rate'}
+                      onChange={() => setExpenseForm((current) => ({ ...current, conversionMethod: 'rate' }))}
+                    />
+                    환율로 계산
+                  </label>
+                  <label className={expenseForm.conversionMethod === 'actual' ? 'selected' : ''}>
+                    <input
+                      type="radio"
+                      name="expense-conversion-method"
+                      checked={expenseForm.conversionMethod === 'actual'}
+                      onChange={() => setExpenseForm((current) => ({ ...current, conversionMethod: 'actual' }))}
+                    />
+                    실제 청구액
+                  </label>
+                </div>
+                {expenseForm.conversionMethod === 'rate' ? (
+                  <label className="currency-input-label">
+                    <span>1 {expenseForm.currency}당 원화 환율</span>
+                    <input
+                      value={expenseForm.exchangeRate}
+                      onChange={(event) => setExpenseForm((current) => ({ ...current, exchangeRate: event.target.value }))}
+                      placeholder="예: 9.3"
+                      inputMode="decimal"
+                    />
+                  </label>
+                ) : (
+                  <label className="currency-input-label">
+                    <span>카드에 찍힌 실제 원화 청구액</span>
+                    <input
+                      value={expenseForm.actualKrwAmount}
+                      onChange={(event) => setExpenseForm((current) => ({ ...current, actualKrwAmount: event.target.value }))}
+                      placeholder="예: 46500"
+                      inputMode="text"
+                    />
+                  </label>
+                )}
+                <div className="conversion-preview" aria-live="polite">
+                  {expenseMoneyPreview?.originalAmount && expenseMoneyPreview.originalCurrency ? (
+                    <>
+                      <span>{formatForeignCurrency(expenseMoneyPreview.originalAmount, expenseMoneyPreview.originalCurrency)}</span>
+                      <span>→</span>
+                      <strong>정산 반영 {currency.format(expenseMoneyPreview.amount)}</strong>
+                      <em className={expenseMoneyPreview.conversionMethod === 'rate' ? 'estimate-badge' : 'actual-badge'}>
+                        {expenseMoneyPreview.conversionMethod === 'rate' ? '예상' : '확정'}
+                      </em>
+                    </>
+                  ) : (
+                    <span>외화 금액과 환산 정보를 입력하면 원화 정산액을 보여드려요.</span>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="participant-box">
               <p className="helper">누가 같이 썼는지 선택</p>
               <div className="checkbox-list">
@@ -1203,6 +1485,11 @@ function App() {
           <div className="section-header-with-actions">
             <div>
               <h2>자동 정산 결과</h2>
+              {estimatedForeignExpenseCount > 0 && (
+                <p className="foreign-settlement-warning">
+                  예상 환율이 적용된 외화 지출 {estimatedForeignExpenseCount}건이 있어요. 실제 청구액에 따라 결과가 달라질 수 있습니다.
+                </p>
+              )}
             </div>
             <button onClick={copySettlementSummary}>정산 결과 복사</button>
           </div>
@@ -1273,6 +1560,12 @@ function App() {
                     <div className="history-main">
                       <strong>{expense.title}</strong>
                       <p>{withSubjectParticle(memberMap[expense.payerId]?.name ?? '')} 결제, {expense.participantIds.map((id) => memberMap[id]?.name).filter(Boolean).join(', ')} 사용</p>
+                      {expense.originalAmount && expense.originalCurrency && expense.exchangeRate && expense.conversionMethod && (
+                        <p className="foreign-history-detail">
+                          {formatForeignCurrency(expense.originalAmount, expense.originalCurrency)} · 1 {expense.originalCurrency} = {rateFormatter.format(expense.exchangeRate)}원
+                          <em className={expense.conversionMethod === 'rate' ? 'estimate-badge' : 'actual-badge'}>{expense.conversionMethod === 'rate' ? '예상' : '확정'}</em>
+                        </p>
+                      )}
                     </div>
                     <span className="history-amount">{currency.format(expense.amount)}</span>
                     <div className="history-side">
@@ -1292,6 +1585,12 @@ function App() {
                     <strong>{expense.title}</strong>
                     <p>{withSubjectParticle(memberMap[expense.payerId]?.name ?? '')} 결제</p>
                     <p>{expense.participantIds.map((id) => memberMap[id]?.name).filter(Boolean).join(', ')} 사용</p>
+                    {expense.originalAmount && expense.originalCurrency && expense.exchangeRate && expense.conversionMethod && (
+                      <p className="foreign-history-detail">
+                        {formatForeignCurrency(expense.originalAmount, expense.originalCurrency)} · 1 {expense.originalCurrency} = {rateFormatter.format(expense.exchangeRate)}원
+                        <em className={expense.conversionMethod === 'rate' ? 'estimate-badge' : 'actual-badge'}>{expense.conversionMethod === 'rate' ? '예상' : '확정'}</em>
+                      </p>
+                    )}
                     <em className="history-amount">{currency.format(expense.amount)}</em>
                     <div className="history-side">
                       <button onClick={() => openExpenseEdit(expense)}>수정</button>
@@ -1376,6 +1675,52 @@ function App() {
             <button onClick={duplicateCurrentSettlement}>현재 정산 복제</button>
             <button onClick={resetCurrentSettlement}>전체 초기화</button>
           </div>
+        </section>
+
+        <section id="currency-settings" className="panel settings-panel">
+          <div className="section-header-with-actions">
+            <div>
+              <h2>설정</h2>
+              <p className="helper">필요할 때만 외화 입력을 켤 수 있어요. 자동 정산 결과는 항상 원화로 계산됩니다.</p>
+            </div>
+            <label className="setting-toggle">
+              <input
+                type="checkbox"
+                checked={foreignCurrencySettings.enabled}
+                onChange={(event) => setForeignCurrencyEnabled(event.target.checked)}
+              />
+              <span>
+                <strong>해외 통화 입력</strong>
+                <small>{foreignCurrencySettings.enabled ? '사용 중' : '사용 안 함'}</small>
+              </span>
+            </label>
+          </div>
+          {foreignCurrencySettings.enabled && (
+            <div className="currency-settings-grid">
+              <label className="currency-input-label">
+                <span>기본 현지 통화</span>
+                <select value={foreignCurrencySettings.currency} onChange={(event) => setDefaultForeignCurrency(event.target.value)}>
+                  {supportedForeignCurrencies.map((item) => (
+                    <option key={item.code} value={item.code}>{item.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="currency-input-label">
+                <span>1 {foreignCurrencySettings.currency}당 기본 원화 환율</span>
+                <input
+                  value={foreignCurrencySettings.exchangeRate}
+                  onChange={(event) => setDefaultExchangeRate(event.target.value)}
+                  placeholder="예: 9.3"
+                  inputMode="decimal"
+                />
+              </label>
+              <div className="base-currency-card">
+                <span>정산 기준 통화</span>
+                <strong>대한민국 원 (KRW)</strong>
+                <small>송금·회비·최종 정산은 원화로 입력해요.</small>
+              </div>
+            </div>
+          )}
         </section>
       </main>
 
@@ -1545,7 +1890,34 @@ function App() {
             </div>
             <div className="form-grid">
               <input value={expenseEditForm.title} onChange={(event) => setExpenseEditForm((current) => ({ ...current, title: event.target.value }))} placeholder="항목명" />
-              <input value={expenseEditForm.amount} onChange={(event) => setExpenseEditForm((current) => ({ ...current, amount: event.target.value }))} placeholder="금액 (예: 12000+8000)" inputMode="text" />
+              {(foreignCurrencySettings.enabled || expenseEditForm.currency !== 'KRW') && (
+                <select
+                  aria-label="결제 통화"
+                  value={expenseEditForm.currency}
+                  onChange={(event) => setExpenseEditForm((current) => ({
+                    ...current,
+                    amount: '',
+                    currency: event.target.value,
+                    exchangeRate: event.target.value === 'KRW' ? '' : foreignCurrencySettings.exchangeRate,
+                    conversionMethod: 'rate',
+                    actualKrwAmount: '',
+                  }))}
+                >
+                  <option value="KRW">대한민국 원 (KRW)</option>
+                  {!supportedForeignCurrencies.some((item) => item.code === expenseEditForm.currency) && expenseEditForm.currency !== 'KRW' && (
+                    <option value={expenseEditForm.currency}>{expenseEditForm.currency}</option>
+                  )}
+                  {supportedForeignCurrencies.map((item) => (
+                    <option key={item.code} value={item.code}>{item.label}</option>
+                  ))}
+                </select>
+              )}
+              <input
+                value={expenseEditForm.amount}
+                onChange={(event) => setExpenseEditForm((current) => ({ ...current, amount: event.target.value }))}
+                placeholder={expenseEditForm.currency === 'KRW' ? '금액 (예: 12000+8000)' : `${expenseEditForm.currency} 결제 금액`}
+                inputMode={expenseEditForm.currency === 'KRW' ? 'text' : 'decimal'}
+              />
               <select value={expenseEditForm.payerId} onChange={(event) => setExpenseEditForm((current) => ({ ...current, payerId: event.target.value }))}>
                 <option value="">결제자 선택</option>
                 {members.map((member) => (
@@ -1553,6 +1925,65 @@ function App() {
                 ))}
               </select>
             </div>
+            {expenseEditForm.currency !== 'KRW' && (
+              <div className="foreign-expense-controls">
+                <div className="conversion-choices" role="radiogroup" aria-label="원화 환산 방식">
+                  <label className={expenseEditForm.conversionMethod === 'rate' ? 'selected' : ''}>
+                    <input
+                      type="radio"
+                      name="expense-edit-conversion-method"
+                      checked={expenseEditForm.conversionMethod === 'rate'}
+                      onChange={() => setExpenseEditForm((current) => ({ ...current, conversionMethod: 'rate' }))}
+                    />
+                    환율로 계산
+                  </label>
+                  <label className={expenseEditForm.conversionMethod === 'actual' ? 'selected' : ''}>
+                    <input
+                      type="radio"
+                      name="expense-edit-conversion-method"
+                      checked={expenseEditForm.conversionMethod === 'actual'}
+                      onChange={() => setExpenseEditForm((current) => ({ ...current, conversionMethod: 'actual' }))}
+                    />
+                    실제 청구액
+                  </label>
+                </div>
+                {expenseEditForm.conversionMethod === 'rate' ? (
+                  <label className="currency-input-label">
+                    <span>1 {expenseEditForm.currency}당 원화 환율</span>
+                    <input
+                      value={expenseEditForm.exchangeRate}
+                      onChange={(event) => setExpenseEditForm((current) => ({ ...current, exchangeRate: event.target.value }))}
+                      placeholder="예: 9.3"
+                      inputMode="decimal"
+                    />
+                  </label>
+                ) : (
+                  <label className="currency-input-label">
+                    <span>카드에 찍힌 실제 원화 청구액</span>
+                    <input
+                      value={expenseEditForm.actualKrwAmount}
+                      onChange={(event) => setExpenseEditForm((current) => ({ ...current, actualKrwAmount: event.target.value }))}
+                      placeholder="예: 46500"
+                      inputMode="text"
+                    />
+                  </label>
+                )}
+                <div className="conversion-preview" aria-live="polite">
+                  {expenseEditMoneyPreview?.originalAmount && expenseEditMoneyPreview.originalCurrency ? (
+                    <>
+                      <span>{formatForeignCurrency(expenseEditMoneyPreview.originalAmount, expenseEditMoneyPreview.originalCurrency)}</span>
+                      <span>→</span>
+                      <strong>정산 반영 {currency.format(expenseEditMoneyPreview.amount)}</strong>
+                      <em className={expenseEditMoneyPreview.conversionMethod === 'rate' ? 'estimate-badge' : 'actual-badge'}>
+                        {expenseEditMoneyPreview.conversionMethod === 'rate' ? '예상' : '확정'}
+                      </em>
+                    </>
+                  ) : (
+                    <span>외화 금액과 환산 정보를 입력하면 원화 정산액을 보여드려요.</span>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="checkbox-list">
               {members.map((member) => (
                 <label key={member.id}>

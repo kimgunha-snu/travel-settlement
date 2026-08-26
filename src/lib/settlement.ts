@@ -9,6 +9,10 @@ export type Expense = {
   amount: number
   payerId: string
   participantIds: string[]
+  originalAmount?: number
+  originalCurrency?: string
+  exchangeRate?: number
+  conversionMethod?: 'rate' | 'actual'
 }
 
 export type Transfer = {
@@ -79,6 +83,38 @@ const readMoney = (record: Record<string, unknown>, key: string) => {
   return value
 }
 
+const readPositiveNumber = (record: Record<string, unknown>, key: string) => {
+  const value = record[key]
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${key} must be a positive number`)
+  }
+  return value
+}
+
+const readForeignExpense = (record: Record<string, unknown>): Pick<Expense, 'originalAmount' | 'originalCurrency' | 'exchangeRate' | 'conversionMethod'> => {
+  const keys = ['originalAmount', 'originalCurrency', 'exchangeRate', 'conversionMethod'] as const
+  const providedCount = keys.filter((key) => record[key] !== undefined).length
+  if (providedCount === 0) return {}
+  if (providedCount !== keys.length) throw new Error('foreign expense metadata must be complete')
+
+  const originalCurrency = readString(record, 'originalCurrency').toUpperCase()
+  if (!/^[A-Z]{3}$/.test(originalCurrency) || originalCurrency === 'KRW') {
+    throw new Error('originalCurrency must be a non-KRW ISO currency code')
+  }
+
+  const conversionMethod = record.conversionMethod
+  if (conversionMethod !== 'rate' && conversionMethod !== 'actual') {
+    throw new Error('conversionMethod must be rate or actual')
+  }
+
+  return {
+    originalAmount: readPositiveNumber(record, 'originalAmount'),
+    originalCurrency,
+    exchangeRate: readPositiveNumber(record, 'exchangeRate'),
+    conversionMethod,
+  }
+}
+
 const readStringArray = (record: Record<string, unknown>, key: string) => {
   const value = record[key]
   if (!Array.isArray(value) || !value.every((item) => typeof item === 'string' && item.trim())) {
@@ -107,6 +143,7 @@ export const parseSettlementPayload = (value: unknown): SettlementPayload => {
     amount: readMoney(expense, 'amount'),
     payerId: readString(expense, 'payerId'),
     participantIds: readStringArray(expense, 'participantIds'),
+    ...readForeignExpense(expense),
   }))
   const transfers = readRecordArray(value, 'transfers').map((transfer) => {
     const fromId = readString(transfer, 'fromId')

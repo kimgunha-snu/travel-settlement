@@ -23,6 +23,25 @@ const payload = (overrides: Partial<SettlementPayload> = {}): SettlementPayload 
 })
 
 describe('calculateBalances', () => {
+  it('uses the settled won amount for foreign-currency expenses', () => {
+    const balances = calculateBalances(payload({
+      members: members.slice(0, 2),
+      expenses: [{
+        id: 'e1',
+        title: 'lunch',
+        amount: 41_200,
+        payerId: 'a',
+        participantIds: ['a', 'b'],
+        originalAmount: 1_000,
+        originalCurrency: 'THB',
+        exchangeRate: 41.2,
+        conversionMethod: 'rate',
+      }],
+    }))
+
+    expect(balances.map((row) => row.net)).toEqual([20_600, -20_600])
+  })
+
   it('distributes indivisible won amounts deterministically', () => {
     const balances = calculateBalances(payload({
       expenses: [{ id: 'e1', title: 'expense', amount: 100, payerId: 'a', participantIds: ['a', 'b', 'c'] }],
@@ -90,6 +109,25 @@ describe('payload validation and sanitation', () => {
     })
     expect(() => parseSettlementPayload({ ...valid, expenses: [{ ...valid.expenses[0], amount: 10.5 }] })).toThrow()
     expect(() => parseSettlementPayload({ ...valid, expenses: [{ ...valid.expenses[0], amount: '100' }] })).toThrow()
+  })
+
+  it('accepts complete foreign expense metadata and rejects partial metadata', () => {
+    const foreignExpense = {
+      id: 'e1',
+      title: 'expense',
+      amount: 41_200,
+      payerId: 'a',
+      participantIds: ['a'],
+      originalAmount: 1_000,
+      originalCurrency: 'THB',
+      exchangeRate: 41.2,
+      conversionMethod: 'rate' as const,
+    }
+
+    expect(parseSettlementPayload(payload({ expenses: [foreignExpense] })).expenses[0]).toMatchObject(foreignExpense)
+    expect(() => parseSettlementPayload(payload({
+      expenses: [{ ...foreignExpense, exchangeRate: undefined }],
+    }))).toThrow('foreign expense metadata must be complete')
   })
 })
 

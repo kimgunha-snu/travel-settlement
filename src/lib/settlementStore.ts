@@ -25,6 +25,10 @@ type ExpenseRow = {
   amount: number
   payer_member_id: string
   participant_member_ids: string[]
+  original_amount: number | string | null
+  original_currency: string | null
+  exchange_rate: number | string | null
+  conversion_method: 'rate' | 'actual' | null
 }
 
 type TransferRow = {
@@ -85,6 +89,17 @@ const mapPayloadFromRows = (
     amount: Number(expense.amount),
     payerId: expense.payer_member_id,
     participantIds: expense.participant_member_ids ?? [],
+    ...(expense.original_amount !== null
+      && expense.original_currency
+      && expense.exchange_rate !== null
+      && expense.conversion_method
+      ? {
+          originalAmount: Number(expense.original_amount),
+          originalCurrency: expense.original_currency,
+          exchangeRate: Number(expense.exchange_rate),
+          conversionMethod: expense.conversion_method,
+        }
+      : {}),
   })),
   transfers: transfers.map((transfer) => ({
     id: transfer.id,
@@ -150,7 +165,7 @@ const getSettlementData = async (settlement: Omit<SettlementRecord, 'data'>) => 
 
   const [{ data: members, error: membersError }, { data: expenses, error: expensesError }, { data: transfers, error: transfersError }] = await Promise.all([
     supabase.from(membersTable).select('id, settlement_id, name').eq('settlement_id', id).order('created_at', { ascending: true }),
-    supabase.from(expensesTable).select('id, settlement_id, title, amount, payer_member_id, participant_member_ids').eq('settlement_id', id).order('created_at', { ascending: true }),
+    supabase.from(expensesTable).select('id, settlement_id, title, amount, payer_member_id, participant_member_ids, original_amount, original_currency, exchange_rate, conversion_method').eq('settlement_id', id).order('created_at', { ascending: true }),
     supabase.from(transfersTable).select('id, settlement_id, amount, from_member_id, to_member_id').eq('settlement_id', id).order('created_at', { ascending: true }),
   ])
 
@@ -183,6 +198,10 @@ const replaceSettlementContent = async (id: string, payload: SettlementPayload, 
       amount: expense.amount,
       payer_member_id: expense.payerId,
       participant_member_ids: expense.participantIds,
+      original_amount: expense.originalAmount ?? null,
+      original_currency: expense.originalCurrency ?? null,
+      exchange_rate: expense.exchangeRate ?? null,
+      conversion_method: expense.conversionMethod ?? null,
     })),
     p_transfers: payload.transfers.map((transfer) => ({
       id: transfer.id,
@@ -222,6 +241,10 @@ export const addRemoteExpense = async (settlementId: string, expense: Expense) =
     amount: expense.amount,
     payer_member_id: expense.payerId,
     participant_member_ids: expense.participantIds,
+    original_amount: expense.originalAmount ?? null,
+    original_currency: expense.originalCurrency ?? null,
+    exchange_rate: expense.exchangeRate ?? null,
+    conversion_method: expense.conversionMethod ?? null,
   })
   if (error) throw error
 }
@@ -233,6 +256,10 @@ export const updateRemoteExpense = async (expense: Expense) => {
     amount: expense.amount,
     payer_member_id: expense.payerId,
     participant_member_ids: expense.participantIds,
+    original_amount: expense.originalAmount ?? null,
+    original_currency: expense.originalCurrency ?? null,
+    exchange_rate: expense.exchangeRate ?? null,
+    conversion_method: expense.conversionMethod ?? null,
   }).eq('id', expense.id)
   if (error) throw error
 }
