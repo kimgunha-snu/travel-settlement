@@ -196,7 +196,8 @@ h3 {
 }
 
 .currency-input-label > span,
-.base-currency-card > span {
+.base-currency-card > span,
+.reference-rate-card > span {
   color: #475569;
   font-size: 0.9rem;
   font-weight: 700;
@@ -277,13 +278,35 @@ h3 {
   margin-top: 18px;
 }
 
-.base-currency-card {
+.base-currency-card,
+.reference-rate-card {
   display: grid;
   gap: 7px;
   padding: 11px 12px;
   border: 1px solid #dbe3f0;
   border-radius: 12px;
   background: #f8fafc;
+}
+
+.reference-rate-card {
+  border-color: #c7d2fe;
+  background: #fff;
+}
+
+.reference-rate-card small {
+  color: #64748b;
+}
+
+.reference-rate-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.reference-rate-error button {
+  padding: 7px 10px;
 }
 
 input,
