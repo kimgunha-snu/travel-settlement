@@ -162,29 +162,6 @@ h3 {
   background: #eef2ff;
 }
 
-.conversion-choices {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.conversion-choices label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid #cbd5e1;
-  border-radius: 12px;
-  background: #fff;
-  cursor: pointer;
-}
-
-.conversion-choices label.selected {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 1px #6366f1;
-}
-
-.conversion-choices input,
 .setting-toggle input {
   width: auto;
   margin: 0;
@@ -196,7 +173,8 @@ h3 {
 }
 
 .currency-input-label > span,
-.base-currency-card > span {
+.base-currency-card > span,
+.reference-rate-card > span {
   color: #475569;
   font-size: 0.9rem;
   font-weight: 700;
@@ -284,6 +262,26 @@ h3 {
   border: 1px solid #dbe3f0;
   border-radius: 12px;
   background: #f8fafc;
+}
+
+.reference-rate-card {
+  display: grid;
+  gap: 7px;
+  padding: 11px 12px;
+  border: 1px solid #c7d2fe;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.reference-rate-card small {
+  color: #64748b;
+}
+
+.reference-rate-card a {
+  width: fit-content;
+  color: #4f46e5;
+  font-size: 0.88rem;
+  font-weight: 700;
 }
 
 input,
@@ -616,8 +614,7 @@ th {
   .two-column,
   .form-grid,
   .inline-form,
-  .currency-settings-grid,
-  .conversion-choices {
+  .currency-settings-grid {
     grid-template-columns: 1fr;
   }
 

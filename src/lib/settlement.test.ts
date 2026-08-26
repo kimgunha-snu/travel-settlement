@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   calculateBalances,
   calculateSettlements,
+  convertForeignAmountToWon,
   getMemberReferences,
   parseSettlementPayload,
   sanitizeSettlementPayload,
@@ -20,6 +21,18 @@ const payload = (overrides: Partial<SettlementPayload> = {}): SettlementPayload 
   transfers: [],
   duesCollections: [],
   ...overrides,
+})
+
+describe('convertForeignAmountToWon', () => {
+  it('rounds a foreign amount using the configured reference rate', () => {
+    expect(convertForeignAmountToWon(5_000, 9.3)).toBe(46_500)
+    expect(convertForeignAmountToWon(101, 9.35)).toBe(944)
+  })
+
+  it('rejects invalid amounts and rates', () => {
+    expect(() => convertForeignAmountToWon(0, 9.3)).toThrow()
+    expect(() => convertForeignAmountToWon(5_000, 0)).toThrow()
+  })
 })
 
 describe('calculateBalances', () => {

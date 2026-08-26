@@ -233,6 +233,15 @@ const assertMoney = (amount: number) => {
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('All amounts must be positive integer won values')
 }
 
+export const convertForeignAmountToWon = (originalAmount: number, exchangeRate: number) => {
+  if (!Number.isFinite(originalAmount) || originalAmount <= 0) throw new Error('Foreign amount must be positive')
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new Error('Exchange rate must be positive')
+
+  const amount = Math.round(originalAmount * exchangeRate)
+  assertMoney(amount)
+  return amount
+}
+
 export const calculateBalances = (payload: SettlementPayload): BalanceRow[] => {
   const rows = new Map<string, BalanceRow>()
   payload.members.forEach((member) => {
