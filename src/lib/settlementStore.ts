@@ -25,10 +25,10 @@ type ExpenseRow = {
   amount: number
   payer_member_id: string
   participant_member_ids: string[]
-  original_amount: number | string | null
-  original_currency: string | null
-  exchange_rate: number | string | null
-  conversion_method: 'rate' | 'actual' | null
+  original_amount?: number | string | null
+  original_currency?: string | null
+  exchange_rate?: number | string | null
+  conversion_method?: 'rate' | 'actual' | null
 }
 
 type TransferRow = {
@@ -44,8 +44,41 @@ const membersTable = 'settlement_members'
 const expensesTable = 'settlement_expenses'
 const transfersTable = 'settlement_transfers'
 const settlementTitleMetaPrefix = '__travel_settlement_meta_v1__:'
+const missingForeignColumnsMessage = '공유 정산에서 외화 지출을 저장하려면 최신 Supabase 마이그레이션을 먼저 적용해 주세요.'
 
 const emptyPayload = (): SettlementPayload => ({ members: [], expenses: [], transfers: [], duesCollections: [] })
+
+const isMissingForeignColumnsError = (error: { code?: string; message?: string } | null) => Boolean(
+  error
+  && (error.code === '42703'
+    || error.code === 'PGRST204'
+    || error.message?.includes('original_amount')
+    || error.message?.includes('original_currency')
+    || error.message?.includes('exchange_rate')
+    || error.message?.includes('conversion_method')),
+)
+
+const getExpenseRowValues = (expense: Expense, includeForeignColumns: boolean) => ({
+  title: expense.title,
+  amount: expense.amount,
+  payer_member_id: expense.payerId,
+  participant_member_ids: expense.participantIds,
+  ...(includeForeignColumns
+    ? {
+        original_amount: expense.originalAmount ?? null,
+        original_currency: expense.originalCurrency ?? null,
+        exchange_rate: expense.exchangeRate ?? null,
+        conversion_method: expense.conversionMethod ?? null,
+      }
+    : {}),
+})
+
+const assertForeignExpenseColumns = async () => {
+  if (!supabase) throw new Error('Supabase is not configured')
+  const { error } = await supabase.from(expensesTable).select('original_amount').limit(0)
+  if (isMissingForeignColumnsError(error)) throw new Error(missingForeignColumnsMessage)
+  if (error) throw error
+}
 
 const parseTitleMetadata = (title: string | null) => {
   if (!title?.startsWith(settlementTitleMetaPrefix)) {
@@ -165,7 +198,7 @@ const getSettlementData = async (settlement: Omit<SettlementRecord, 'data'>) => 
 
   const [{ data: members, error: membersError }, { data: expenses, error: expensesError }, { data: transfers, error: transfersError }] = await Promise.all([
     supabase.from(membersTable).select('id, settlement_id, name').eq('settlement_id', id).order('created_at', { ascending: true }),
-    supabase.from(expensesTable).select('id, settlement_id, title, amount, payer_member_id, participant_member_ids, original_amount, original_currency, exchange_rate, conversion_method').eq('settlement_id', id).order('created_at', { ascending: true }),
+    supabase.from(expensesTable).select('*').eq('settlement_id', id).order('created_at', { ascending: true }),
     supabase.from(transfersTable).select('id, settlement_id, amount, from_member_id, to_member_id').eq('settlement_id', id).order('created_at', { ascending: true }),
   ])
 
@@ -234,33 +267,33 @@ export const deleteRemoteMember = async (memberId: string) => {
 
 export const addRemoteExpense = async (settlementId: string, expense: Expense) => {
   if (!supabase) throw new Error('Supabase is not configured')
-  const { error } = await supabase.from(expensesTable).insert({
+  const baseValues = {
     id: expense.id,
     settlement_id: settlementId,
-    title: expense.title,
-    amount: expense.amount,
-    payer_member_id: expense.payerId,
-    participant_member_ids: expense.participantIds,
-    original_amount: expense.originalAmount ?? null,
-    original_currency: expense.originalCurrency ?? null,
-    exchange_rate: expense.exchangeRate ?? null,
-    conversion_method: expense.conversionMethod ?? null,
+  }
+  let { error } = await supabase.from(expensesTable).insert({
+    ...baseValues,
+    ...getExpenseRowValues(expense, true),
   })
+  if (isMissingForeignColumnsError(error)) {
+    if (expense.originalCurrency) throw new Error(missingForeignColumnsMessage)
+    const retry = await supabase.from(expensesTable).insert({
+      ...baseValues,
+      ...getExpenseRowValues(expense, false),
+    })
+    error = retry.error
+  }
   if (error) throw error
 }
 
 export const updateRemoteExpense = async (expense: Expense) => {
   if (!supabase) throw new Error('Supabase is not configured')
-  const { error } = await supabase.from(expensesTable).update({
-    title: expense.title,
-    amount: expense.amount,
-    payer_member_id: expense.payerId,
-    participant_member_ids: expense.participantIds,
-    original_amount: expense.originalAmount ?? null,
-    original_currency: expense.originalCurrency ?? null,
-    exchange_rate: expense.exchangeRate ?? null,
-    conversion_method: expense.conversionMethod ?? null,
-  }).eq('id', expense.id)
+  let { error } = await supabase.from(expensesTable).update(getExpenseRowValues(expense, true)).eq('id', expense.id)
+  if (isMissingForeignColumnsError(error)) {
+    if (expense.originalCurrency) throw new Error(missingForeignColumnsMessage)
+    const retry = await supabase.from(expensesTable).update(getExpenseRowValues(expense, false)).eq('id', expense.id)
+    error = retry.error
+  }
   if (error) throw error
 }
 
@@ -356,6 +389,7 @@ export const subscribeSettlement = (
 
 export const updateSettlement = async (id: string, payload: SettlementPayload, title?: string) => {
   if (!supabase) throw new Error('Supabase is not configured')
+  if (payload.expenses.some((expense) => expense.originalCurrency)) await assertForeignExpenseColumns()
 
   const current = await getSettlementBaseById(id)
   const currentTitle = parseTitleMetadata(current.title).title

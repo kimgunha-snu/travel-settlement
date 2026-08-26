@@ -1150,7 +1150,10 @@ function App() {
 
     if (sharedSettlementId && canUseRemoteStore()) {
       setExpenses((current) => current.map((expense) => expense.id !== editingExpenseId ? expense : nextExpense))
-      void updateRemoteExpense(nextExpense).catch(() => setRemoteStatus('지출 수정에 실패했어요.'))
+      void updateRemoteExpense(nextExpense).catch((error) => {
+        const message = error instanceof Error ? error.message : '지출 수정에 실패했어요.'
+        setRemoteStatus(message)
+      })
     } else {
       setExpenses((current) => current.map((expense) => expense.id !== editingExpenseId ? expense : nextExpense))
     }
