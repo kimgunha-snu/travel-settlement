@@ -22,6 +22,7 @@ import {
 import {
   calculateBalances,
   calculateSettlements,
+  applyReferenceRateToExpenses,
   convertForeignAmountToWon,
   defaultCurrencySettings,
   getMemberReferences,
@@ -209,6 +210,17 @@ const resolveExpenseMoney = (draft: ExpenseMoneyDraft): Pick<Expense, 'amount' |
   }
 }
 
+const applyConfiguredReferenceRate = (expenses: Expense[], settings: ForeignCurrencySettings) => {
+  const exchangeRate = evaluatePositiveNumberInput(settings.exchangeRate)
+  if (exchangeRate === null) return expenses
+
+  try {
+    return applyReferenceRateToExpenses(expenses, settings.currency, exchangeRate)
+  } catch {
+    return expenses
+  }
+}
+
 const formatForeignCurrency = (amount: number, currencyCode: string) => new Intl.NumberFormat('ko-KR', {
   style: 'currency',
   currency: currencyCode,
@@ -347,11 +359,18 @@ const normalizePayloadForRemote = (payload: SettlementPayload) => {
 }
 
 function App() {
-  const [foreignCurrencySettings, setForeignCurrencySettings] = useState<ForeignCurrencySettings>(() => readStoredData().currencySettings)
-  const [members, setMembers] = useState<Member[]>(() => readStoredData().members)
-  const [expenses, setExpenses] = useState<Expense[]>(() => readStoredData().expenses)
-  const [transfers, setTransfers] = useState<Transfer[]>(() => readStoredData().transfers)
-  const [duesCollections, setDuesCollections] = useState<DuesCollection[]>(() => readStoredData().duesCollections)
+  const [initialPayload] = useState<SettlementPayload>(() => {
+    const storedPayload = readStoredData()
+    return {
+      ...storedPayload,
+      expenses: applyConfiguredReferenceRate(storedPayload.expenses, storedPayload.currencySettings),
+    }
+  })
+  const [foreignCurrencySettings, setForeignCurrencySettings] = useState<ForeignCurrencySettings>(initialPayload.currencySettings)
+  const [members, setMembers] = useState<Member[]>(initialPayload.members)
+  const [expenses, setExpenses] = useState<Expense[]>(initialPayload.expenses)
+  const [transfers, setTransfers] = useState<Transfer[]>(initialPayload.transfers)
+  const [duesCollections, setDuesCollections] = useState<DuesCollection[]>(initialPayload.duesCollections)
   const [newMemberName, setNewMemberName] = useState('')
   const [expenseForm, setExpenseForm] = useState<ExpenseFormState>(() => ({
     title: '',
@@ -471,19 +490,23 @@ function App() {
         const record = await getSettlementByToken(settlementToken)
         if (isCancelled) return
         const cleaned = sanitizeSettlementPayload(parseSettlementPayload(record.data))
+        const normalizedPayload = {
+          ...cleaned.payload,
+          expenses: applyConfiguredReferenceRate(cleaned.payload.expenses, cleaned.payload.currencySettings),
+        }
         suppressNextRemoteSaveRef.current = true
-        lastRemoteJsonRef.current = JSON.stringify(cleaned.payload)
+        lastRemoteJsonRef.current = JSON.stringify(normalizedPayload)
         setSharedSettlementId(record.id)
         setSharedSettlementToken(record.share_token)
-        setMembers(cleaned.payload.members)
-        setExpenses(cleaned.payload.expenses)
-        setTransfers(cleaned.payload.transfers)
-        setDuesCollections(cleaned.payload.duesCollections)
-        setForeignCurrencySettings(cleaned.payload.currencySettings)
+        setMembers(normalizedPayload.members)
+        setExpenses(normalizedPayload.expenses)
+        setTransfers(normalizedPayload.transfers)
+        setDuesCollections(normalizedPayload.duesCollections)
+        setForeignCurrencySettings(normalizedPayload.currencySettings)
         setExpenseForm((current) => ({
           ...current,
-          currency: cleaned.payload.currencySettings.enabled ? cleaned.payload.currencySettings.currency : 'KRW',
-          exchangeRate: cleaned.payload.currencySettings.enabled ? cleaned.payload.currencySettings.exchangeRate : '',
+          currency: normalizedPayload.currencySettings.enabled ? normalizedPayload.currencySettings.currency : 'KRW',
+          exchangeRate: normalizedPayload.currencySettings.enabled ? normalizedPayload.currencySettings.exchangeRate : '',
         }))
         setRemoteStatus(cleaned.changed ? '삭제된 참가자의 연결 데이터를 정리하고 있어요.' : `공유 정산 연결됨: ${record.id}`)
         const nextShareUrl = createShareUrl(record.share_token)
@@ -517,21 +540,25 @@ function App() {
 
     const applyRemoteRecord = (record: { id: string; data: SettlementPayload }) => {
       const cleaned = sanitizeSettlementPayload(parseSettlementPayload(record.data))
-      const nextJson = JSON.stringify(cleaned.payload)
+      const normalizedPayload = {
+        ...cleaned.payload,
+        expenses: applyConfiguredReferenceRate(cleaned.payload.expenses, cleaned.payload.currencySettings),
+      }
+      const nextJson = JSON.stringify(normalizedPayload)
       if (nextJson === lastRemoteJsonRef.current) {
         return
       }
       suppressNextRemoteSaveRef.current = true
       lastRemoteJsonRef.current = nextJson
-      setMembers(cleaned.payload.members)
-      setExpenses(cleaned.payload.expenses)
-      setTransfers(cleaned.payload.transfers)
-      setDuesCollections(cleaned.payload.duesCollections)
-      setForeignCurrencySettings(cleaned.payload.currencySettings)
+      setMembers(normalizedPayload.members)
+      setExpenses(normalizedPayload.expenses)
+      setTransfers(normalizedPayload.transfers)
+      setDuesCollections(normalizedPayload.duesCollections)
+      setForeignCurrencySettings(normalizedPayload.currencySettings)
       setExpenseForm((current) => ({
         ...current,
-        currency: cleaned.payload.currencySettings.enabled ? cleaned.payload.currencySettings.currency : 'KRW',
-        exchangeRate: cleaned.payload.currencySettings.enabled ? cleaned.payload.currencySettings.exchangeRate : '',
+        currency: normalizedPayload.currencySettings.enabled ? normalizedPayload.currencySettings.currency : 'KRW',
+        exchangeRate: normalizedPayload.currencySettings.enabled ? normalizedPayload.currencySettings.exchangeRate : '',
       }))
       setRemoteStatus(cleaned.changed ? '삭제된 참가자의 연결 데이터를 정리하고 있어요.' : `다른 사람이 수정한 내용을 반영했어요: ${record.id}`)
       if (cleaned.changed) {
@@ -705,13 +732,15 @@ function App() {
   }
 
   const syncForeignCurrencySettings = (nextSettings: ForeignCurrencySettings) => {
+    const normalizedExpenses = applyConfiguredReferenceRate(expenses, nextSettings)
     setForeignCurrencySettings(nextSettings)
+    if (normalizedExpenses !== expenses) setExpenses(normalizedExpenses)
 
     if (!sharedSettlementId || !canUseRemoteStore()) return
 
     const nextPayload: SettlementPayload = {
       members,
-      expenses,
+      expenses: normalizedExpenses,
       transfers,
       duesCollections,
       currencySettings: nextSettings,
@@ -1095,7 +1124,10 @@ function App() {
   const importData = async () => {
     try {
       const cleaned = sanitizeSettlementPayload(parseSettlementPayload(JSON.parse(importText)))
-      let importedPayload = cleaned.payload
+      let importedPayload = {
+        ...cleaned.payload,
+        expenses: applyConfiguredReferenceRate(cleaned.payload.expenses, cleaned.payload.currencySettings),
+      }
       if (sharedSettlementId && canUseRemoteStore()) {
         const shouldOverwrite = window.confirm('가져온 데이터로 현재 공유 정산을 덮어쓸까요?')
         if (!shouldOverwrite) return

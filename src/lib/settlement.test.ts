@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyReferenceRateToExpenses,
   calculateBalances,
   calculateSettlements,
   convertForeignAmountToWon,
@@ -34,6 +35,50 @@ describe('convertForeignAmountToWon', () => {
   it('rejects invalid amounts and rates', () => {
     expect(() => convertForeignAmountToWon(0, 9.3)).toThrow()
     expect(() => convertForeignAmountToWon(5_000, 0)).toThrow()
+  })
+})
+
+describe('applyReferenceRateToExpenses', () => {
+  it('uses one configured rate for every matching foreign expense', () => {
+    const expenses = applyReferenceRateToExpenses([
+      {
+        id: 'e1',
+        title: 'first',
+        amount: 7_040,
+        payerId: 'a',
+        participantIds: ['a'],
+        originalAmount: 800,
+        originalCurrency: 'JPY',
+        exchangeRate: 8.8,
+        conversionMethod: 'rate',
+      },
+      {
+        id: 'e2',
+        title: 'second',
+        amount: 9_790,
+        payerId: 'a',
+        participantIds: ['a'],
+        originalAmount: 1_100,
+        originalCurrency: 'JPY',
+        exchangeRate: 8.9,
+        conversionMethod: 'rate',
+      },
+      {
+        id: 'e3',
+        title: 'other currency',
+        amount: 1_000,
+        payerId: 'a',
+        participantIds: ['a'],
+        originalAmount: 10,
+        originalCurrency: 'USD',
+        exchangeRate: 100,
+        conversionMethod: 'rate',
+      },
+    ], 'JPY', 8.8)
+
+    expect(expenses[0]).toMatchObject({ amount: 7_040, exchangeRate: 8.8 })
+    expect(expenses[1]).toMatchObject({ amount: 9_680, exchangeRate: 8.8 })
+    expect(expenses[2]).toMatchObject({ amount: 1_000, exchangeRate: 100 })
   })
 })
 

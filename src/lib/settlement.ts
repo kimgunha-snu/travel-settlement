@@ -276,6 +276,28 @@ export const convertForeignAmountToWon = (originalAmount: number, exchangeRate: 
   return amount
 }
 
+export const applyReferenceRateToExpenses = (expenses: Expense[], currency: string, exchangeRate: number) => {
+  const normalizedCurrency = currency.toUpperCase()
+  let changed = false
+  const normalizedExpenses = expenses.map((expense) => {
+    if (
+      expense.conversionMethod !== 'rate'
+      || expense.originalCurrency !== normalizedCurrency
+      || expense.originalAmount === undefined
+    ) {
+      return expense
+    }
+
+    const amount = convertForeignAmountToWon(expense.originalAmount, exchangeRate)
+    if (expense.amount === amount && expense.exchangeRate === exchangeRate) return expense
+
+    changed = true
+    return { ...expense, amount, exchangeRate }
+  })
+
+  return changed ? normalizedExpenses : expenses
+}
+
 export const calculateBalances = (payload: SettlementPayload): BalanceRow[] => {
   const rows = new Map<string, BalanceRow>()
   payload.members.forEach((member) => {
